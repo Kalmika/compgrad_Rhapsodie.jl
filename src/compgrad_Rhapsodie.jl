@@ -100,7 +100,7 @@ function comp_grad(x::AbstractArray{T,3}, D) where {T<:AbstractFloat}
     ga = copy(x)
     ga[:, :, 1] = g.I
     ga[:, :, 2] = g.Ip
-    ga[:, :, 3] = g.theta
+    ga[:, :, 3] = g.θ
 
     return ga, chi2
 end
