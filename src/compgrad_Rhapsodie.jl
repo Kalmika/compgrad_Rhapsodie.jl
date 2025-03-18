@@ -97,7 +97,12 @@ function comp_grad(x::AbstractArray{T,3}, D) where {T<:AbstractFloat}
     apply!(g, D.direct_model', wres)
     chi2 = dot(res,wres)
 
-    return g, chi2
+    ga = copy(x)
+    ga[:, :, 1] = g.I
+    ga[:, :, 2] = g.Ip
+    ga[:, :, 3] = g.theta
+
+    return ga, chi2
 end
 
 

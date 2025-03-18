@@ -3,7 +3,9 @@
 To install:
 ```julia
 using Pkg
-Pkg.add(url="https://github.com/emmt/EasyFITS.jl.git")
+pkg"registry add General"
+pkg"registry add https://github.com/emmt/EmmtRegistry"
+pkg"add EasyFITS"
 Pkg.add(url="https://github.com/LaurenceDenneulin/RhapsodieDirect.git")
 Pkg.add(url="https://github.com/andferrari/compgrad_Rhapsodie.jl.git")
 #
