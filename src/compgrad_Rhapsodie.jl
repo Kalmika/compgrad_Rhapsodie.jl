@@ -16,6 +16,7 @@ function init_rhapsodie(write_files=false)
     ker = CatmullRomSpline(Float64, Flat)
 
     # load disk
+    
     object_params=ObjectParameters((128,128),(64.,64.))  # check with file!
 
     dset = h5open(path*"/sample_for_rhapsodie_128x128.h5", "r")
@@ -27,7 +28,7 @@ function init_rhapsodie(write_files=false)
     S = PolarimetricMap("intensities", I, Ip, theta)
 
     # create model
-
+    
     data_params=DatasetParameters((128,256), 64, 2,8, (64.,64.))
     indices=get_indices_table(data_params)
     polar_params=set_default_polarisation_coefficients(indices)
@@ -46,8 +47,7 @@ function init_rhapsodie(write_files=false)
     field_transforms=load_field_transforms(object_params,
                                            data_params,
                                            field_params)
-
-    
+   
     psf_center=readdlm(path*"/PSF_centers_Airy.txt");
     psf=readfits(path*"/PSF_parametered_Airy.fits");
     blur=set_fft_operator(object_params,(psf[1:end÷2,:]'), psf_center[1:2])[1];
@@ -58,11 +58,9 @@ function init_rhapsodie(write_files=false)
     # compute measurements
 
     data, weight = data_simulator(BadPixMap, field_transforms, blur, S);
-
-
     S_convolved = PolarimetricMap("stokes", cat(blur*S.I, blur*S.Q, blur*S.U, dims=3)) 
 
-    write_files && true
+    if write_files == true
         if prod(readdir() .!= "test_results")     
             mkdir("test_results")
         end
@@ -78,13 +76,13 @@ function init_rhapsodie(write_files=false)
         write(S, "test_results/TRUE_$(data_params.size[1]).fits")
 
         write(S_convolved, "test_results/TRUE_convolved_$(data_params.size[1]).fits")
-
-        # DataSet for gradient computation
-
-        # -> à vérifier
-        D = Dataset(data, weight , H)
-
-        return D
+    end
+    
+    # DataSet for gradient computation
+    # -> à vérifier
+    D = Dataset(data, weight , H)
+    
+    return D
 end
 
     # test grad
