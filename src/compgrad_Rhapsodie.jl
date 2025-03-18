@@ -47,8 +47,8 @@ function init_rhapsodie(path::String, write_files=false)
                                            field_params)
 
     
-    psf_center=readdlm(path*"data/PSF_centers_Airy.txt");
-    psf=readfits(path*"data/PSF_parametered_Airy.fits");
+    psf_center=readdlm(path*"/PSF_centers_Airy.txt");
+    psf=readfits(path*"/PSF_parametered_Airy.fits");
     blur=set_fft_operator(object_params,(psf[1:end÷2,:]'), psf_center[1:2])[1];
 
     H = DirectModel(size(S), (128,256,64),S.parameter_type,field_transforms,blur)
