@@ -2,7 +2,7 @@
 
 julia_version = "1.10.7"
 manifest_format = "2.0"
-project_hash = "e76f645d5511c49cae19eb677691b675244f21c8"
+project_hash = "50704f5f8ab81d1a3cf3c61de3f8945e18450484"
 
 [[deps.ArgTools]]
 uuid = "0dad84c5-d112-42e6-8d28-ef12dabb789f"
@@ -13,29 +13,6 @@ uuid = "56f22d72-fd6d-98f1-02f0-08ddc0907c33"
 
 [[deps.Base64]]
 uuid = "2a0f44e3-6c83-55bd-87e4-b1978d98bd5f"
-
-[[deps.CEnum]]
-git-tree-sha1 = "389ad5c84de1ae7cf0e28e381131c98ea87d54fc"
-uuid = "fa961155-64e5-5f13-b03f-caf6b980ea82"
-version = "0.5.0"
-
-[[deps.CFITSIO_jll]]
-deps = ["Artifacts", "JLLWrappers", "LibCURL_jll", "Libdl", "Zlib_jll"]
-git-tree-sha1 = "b90d32054fc88f97dd926022f554180e744e4d7d"
-uuid = "b3e40c51-02ae-5482-8a39-3ace5868dcf4"
-version = "4.4.0+0"
-
-[[deps.Clang]]
-deps = ["CEnum", "Clang_jll", "Downloads", "Pkg", "TOML"]
-git-tree-sha1 = "2397d5da17ba4970f772a9888b208a0a1d77eb5d"
-uuid = "40e3b903-d033-50b4-a0cc-940c62c95e31"
-version = "0.18.3"
-
-[[deps.Clang_jll]]
-deps = ["Artifacts", "JLLWrappers", "Libdl", "TOML", "Zlib_jll", "libLLVM_jll"]
-git-tree-sha1 = "de2204d98741f57e7ddb9a6a738db74ba8a608cb"
-uuid = "0ee61d77-7f21-5576-8119-9fcc46b10100"
-version = "15.0.7+10"
 
 [[deps.CodeTracking]]
 deps = ["InteractiveUtils", "UUIDs"]
@@ -72,18 +49,6 @@ version = "1.9.1"
 deps = ["ArgTools", "FileWatching", "LibCURL", "NetworkOptions"]
 uuid = "f43a241f-c20a-4ad4-852c-f6b1247861c6"
 version = "1.6.0"
-
-[[deps.EasyFITS]]
-deps = ["CFITSIO_jll", "Clang", "Dates", "FITSHeaders", "Libdl", "Requires", "TOML", "TypeUtils"]
-git-tree-sha1 = "eb422f2a7920aefdde7d95da3f5c1db5b30be5a0"
-uuid = "a977f4a2-36a7-4172-89e7-19c2726f82e5"
-version = "0.6.1"
-
-[[deps.FITSHeaders]]
-deps = ["Compat", "Dates", "Requires", "TypeUtils"]
-git-tree-sha1 = "9a0bef81331085ea96b7faf40d86d18806620a01"
-uuid = "8163a04c-c153-4fb1-a498-3402381ec208"
-version = "0.4.2"
 
 [[deps.FileWatching]]
 uuid = "7b1f6079-737a-58dc-b8bc-7a2ca5c1b5ee"
@@ -305,20 +270,6 @@ deps = ["ArgTools", "SHA"]
 uuid = "a4e569a6-e804-4fa4-b0f3-eef7a1d5b13e"
 version = "1.10.0"
 
-[[deps.TypeUtils]]
-deps = ["Requires"]
-git-tree-sha1 = "a08551dac8ad6e8aab85a99ad5bd6c88815bcf52"
-uuid = "c3b1956e-8857-4d84-9b79-890df85b1e67"
-version = "1.5.0"
-
-    [deps.TypeUtils.extensions]
-    TypeUtilsOffsetArraysExt = "OffsetArrays"
-    TypeUtilsUnitfulExt = "Unitful"
-
-    [deps.TypeUtils.weakdeps]
-    OffsetArrays = "6fe1bfb0-de20-5000-8ca7-80f57d26f881"
-    Unitful = "1986cc42-f94f-5a68-af5c-568840ba703d"
-
 [[deps.UUIDs]]
 deps = ["Random", "SHA"]
 uuid = "cf7118a7-6976-5b1a-9a39-7adc72f591a4"
@@ -330,11 +281,6 @@ uuid = "4ec0a83e-493e-50e2-b9ac-8f72acf5a8f5"
 deps = ["Libdl"]
 uuid = "83775a58-1f1d-513f-b197-d71354ab007a"
 version = "1.2.13+1"
-
-[[deps.libLLVM_jll]]
-deps = ["Artifacts", "Libdl"]
-uuid = "8f36deef-c2a5-5394-99ed-8e07531fb29a"
-version = "15.0.7+10"
 
 [[deps.libaec_jll]]
 deps = ["Artifacts", "JLLWrappers", "Libdl"]

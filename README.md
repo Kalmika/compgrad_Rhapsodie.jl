@@ -5,6 +5,7 @@ To install:
 using Pkg
 Pkg.add(url="https://github.com/LaurenceDenneulin/RhapsodieDirect.git")
 Pkg.add(url="https://github.com/andferrari/compgrad_Rhapsodie.jl.git")
+Pkg.add(url="https://github.com/emmt/EasyFITS.jl.git")
 #
 # init
 using compgrad_Rhapsodie

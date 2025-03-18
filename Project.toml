@@ -4,9 +4,7 @@ authors = ["André Ferrari <andferrari@gmail.com>"]
 version = "0.1.0"
 
 [deps]
-RhapsodieDirect = "0ed9b2bd-c76c-4f1a-94cb-965bde98f638"
 DelimitedFiles = "8bb1440f-4735-579b-a4ab-409b98df4dab"
-EasyFITS = "a977f4a2-36a7-4172-89e7-19c2726f82e5"
 HDF5 = "f67ccb44-e63f-5c2f-98bd-6dc0ccc4ba2f"
 InterpolationKernels = "16730964-a2ec-11e9-36fa-47a4f82bfac6"
 LinearAlgebra = "37e2e46d-f89d-539d-b4ee-838fcccc9c8e"
