@@ -13,12 +13,12 @@ Pkg.add(url="https://github.com/andferrari/compgrad_Rhapsodie.jl.git")
 using compgrad_Rhapsodie
 D = init_rhapsodie()
 #
-# and then compute the gradient
+# and then compute the gradient:
 x = randn(128,128,3)
 g, chi2 = comp_grad(x, D)
 ```
 
-then in python:
+To call from python:
 ```python
 
 ```
