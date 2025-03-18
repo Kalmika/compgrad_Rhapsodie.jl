@@ -10,8 +10,9 @@ using LinearAlgebra
 export comp_grad, init_rhapsodie
 
 
-function init_rhapsodie(path::String, write_files=false)
-
+function init_rhapsodie(write_files=false)
+    
+    path = replace(pathof(compgrad_Rhapsodie), "src/compgrad_Rhapsodie.jl" => "data")
     ker = CatmullRomSpline(Float64, Flat)
 
     # load disk
