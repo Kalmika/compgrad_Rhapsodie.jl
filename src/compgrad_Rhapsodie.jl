@@ -85,8 +85,6 @@ function init_rhapsodie(write_files=false)
     return D
 end
 
-    # test grad
-
 function comp_grad(x::AbstractArray{T,3}, D) where {T<:AbstractFloat}  
     S = PolarimetricMap("intensities", x[:, :, 1], x[:, :, 2], x[:, :, 3])
     g = copy(S)
