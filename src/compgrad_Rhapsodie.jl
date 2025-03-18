@@ -10,14 +10,14 @@ using LinearAlgebra
 export comp_grad, init_rhapsodie
 
 
-function init_rhapsodie(write_files=false)
+function init_rhapsodie(path::String, write_files=false)
 
     ker = CatmullRomSpline(Float64, Flat)
 
     # load disk
     object_params=ObjectParameters((128,128),(64.,64.))  # check with file!
 
-    dset = h5open("data/sample_for_rhapsodie_128x128.h5", "r")
+    dset = h5open(path*"/sample_for_rhapsodie_128x128.h5", "r")
     I = read(dset["disk_data"])[:,:,1]
     Ip = read(dset["disk_data"])[:,:,2]
     theta = read(dset["disk_theta"])
@@ -47,8 +47,8 @@ function init_rhapsodie(write_files=false)
                                            field_params)
 
     
-    psf_center=readdlm("data/PSF_centers_Airy.txt");
-    psf=readfits("data/PSF_parametered_Airy.fits");
+    psf_center=readdlm(path*"data/PSF_centers_Airy.txt");
+    psf=readfits(path*"data/PSF_parametered_Airy.fits");
     blur=set_fft_operator(object_params,(psf[1:end÷2,:]'), psf_center[1:2])[1];
 
     H = DirectModel(size(S), (128,256,64),S.parameter_type,field_transforms,blur)
