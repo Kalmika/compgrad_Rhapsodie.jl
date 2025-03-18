@@ -20,5 +20,12 @@ g, chi2 = comp_grad(x, D)
 
 To call from python:
 ```python
-
+from juliacall import Main as jl
+import numpy as np
+jl.seval("using compgrad_Rhapsodie")
+jl.seval("D = init_rhapsodie()")
+x = np.random.uniform(low=0,high=1,size=(128,128,3))
+g, chi2 = jl.comp_grad(x, jl.D)
+# g is by default an Array. Convert to numpy array
+g = np.array(g)
 ```
