@@ -10,26 +10,27 @@ using LinearAlgebra
 export comp_grad, init_rhapsodie
 
 
-function init_rhapsodie(write_files=false)
+function init_rhapsodie(; write_files=false, path_disk = "default")
     
     path = replace(pathof(compgrad_Rhapsodie), "src/compgrad_Rhapsodie.jl" => "data")
+    (path_disk ==  "default") && (path_disk = path*"/sample_for_rhapsodie_128x128.h5")
     ker = CatmullRomSpline(Float64, Flat)
 
     # load disk
     
     object_params=ObjectParameters((128,128),(64.,64.))  # check with file!
 
-    dset = h5open(path*"/sample_for_rhapsodie_128x128.h5", "r")
-    I = read(dset["disk_data"])[:,:,1]
-    Ip = read(dset["disk_data"])[:,:,2]
-    theta = read(dset["disk_theta"])
+    dset = h5open(path_disk, "r")
+        I = read(dset["disk_data"])[:,:,1]
+        Ip = read(dset["disk_data"])[:,:,2]
+        θ = read(dset["disk_theta"])
     close(dset)
 
-    S = PolarimetricMap("intensities", I, Ip, theta)
+    S = PolarimetricMap("intensities", I - Ip, Ip, θ)
 
     # create model
     
-    data_params=DatasetParameters((128,256), 64, 2,8, (64.,64.))
+    data_params=DatasetParameters((128,256), 4, 2,8, (64.,64.))
     indices=get_indices_table(data_params)
     polar_params=set_default_polarisation_coefficients(indices)
     ker=CatmullRomSpline(Float64, Flat)
@@ -52,7 +53,7 @@ function init_rhapsodie(write_files=false)
     psf=readfits(path*"/PSF_parametered_Airy.fits");
     blur=set_fft_operator(object_params,(psf[1:end÷2,:]'), psf_center[1:2])[1];
 
-    H = DirectModel(size(S), (128,256,64),S.parameter_type,field_transforms,blur)
+    H = DirectModel(size(S), (128,256,4),S.parameter_type,field_transforms,blur)
     BadPixMap=Float64.(rand(0.0:1e-16:1.0,data_params.size).< 0.9);
 
     # compute measurements
@@ -86,7 +87,7 @@ function init_rhapsodie(write_files=false)
 end
 
 function comp_grad(x::AbstractArray{T,3}, D) where {T<:AbstractFloat}  
-    S = PolarimetricMap("intensities", x[:, :, 1], x[:, :, 2], x[:, :, 3])
+    S = PolarimetricMap("intensities", x[:, :, 1] - x[:, :, 2], x[:, :, 2], x[:, :, 3])
     g = copy(S)
     res = D.direct_model*S - D.data
     wres = D.weights .* res
@@ -94,9 +95,10 @@ function comp_grad(x::AbstractArray{T,3}, D) where {T<:AbstractFloat}
     chi2 = dot(res,wres)
 
     ga = copy(x)
+     
     ga[:, :, 1] = g.I
-    ga[:, :, 2] = g.Ip
-    ga[:, :, 3] = g.θ
+    ga[:, :, 2] = g.I + cos.(2*g.θ).*g.Q + sin.(2*g.θ).*g.U
+    ga[:, :, 3] = 2*S.Ip.*(-sin.(2*g.θ).*g.Q + cos.(2*g.θ).*g.U)
 
     return ga, chi2
 end
