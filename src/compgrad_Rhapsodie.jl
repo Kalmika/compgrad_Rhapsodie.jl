@@ -21,9 +21,9 @@ function init_rhapsodie(; write_files=false, path_disk = "default")
     object_params=ObjectParameters((128,128),(64.,64.))  # check with file!
 
     dset = h5open(path_disk, "r")
-        I = read(dset["disk_data"])[:,:,1]
-        Ip = read(dset["disk_data"])[:,:,2]
-        θ = read(dset["disk_theta"])
+    I = read(dset["disk_data"])[:,:,1]
+    Ip = read(dset["disk_data"])[:,:,2]
+    θ = read(dset["disk_theta"])
     close(dset)
 
     S = PolarimetricMap("intensities", I - Ip, Ip, θ)
@@ -55,6 +55,7 @@ function init_rhapsodie(; write_files=false, path_disk = "default")
 
     H = DirectModel(size(S), (128,256,4),S.parameter_type,field_transforms,blur)
     BadPixMap=Float64.(rand(0.0:1e-16:1.0,data_params.size).< 0.9);
+    # BadPixMap=ones(data_params.size)
 
     # compute measurements
 
@@ -80,7 +81,6 @@ function init_rhapsodie(; write_files=false, path_disk = "default")
     end
     
     # DataSet for gradient computation
-    # -> à vérifier
     D = Dataset(data, weight , H)
     
     return D
@@ -95,13 +95,11 @@ function comp_grad(x::AbstractArray{T,3}, D) where {T<:AbstractFloat}
     chi2 = dot(res,wres)
 
     ga = copy(x)
-     
+         
     ga[:, :, 1] = g.I
-    ga[:, :, 2] = g.I + cos.(2*S.θ).*g.Q + sin.(2*S.θ).*g.U
-    ga[:, :, 3] = 2*S.Ip.*(-sin.(2*S.θ).*g.Q + cos.(2*S.θ).*g.U)
-
-    #ga[:, :, 2] = g.I + cos.(2*x[:, :, 3]).*g.Q + sin.(2*x[:, :, 3]).*g.U
-    #ga[:, :, 3] = 2*S.Ip.*(-sin.(2*x[:, :, 3]).*g.Q + cos.(2*x[:, :, 3]).*g.U)
+    ga[:, :, 2] = cos.(2*S.θ).*g.Q + sin.(2*S.θ).*g.U
+    # ga[:, :, 3] = 2*S.Ip.*(-sin.(2*S.θ).*g.Q + cos.(2*S.θ).*g.U)
+    ga[:, :, 3] = fill!(ga[:, :, 3], 0.0)
 
     return ga, chi2
 end
