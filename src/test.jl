@@ -11,7 +11,7 @@ close(dset)
 
 function recon(D, μ, niter, θ)
     X = zeros(128,128,3)
-    #X[:,:,3] = θ
+    X[:,:,3] = θ
 
     for k in 1:niter
         X = X - μ*comp_grad(X, D)[1]

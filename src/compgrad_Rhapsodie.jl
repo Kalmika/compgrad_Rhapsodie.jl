@@ -30,7 +30,7 @@ function init_rhapsodie(; write_files=false, path_disk = "default")
 
     # create model
     
-    data_params=DatasetParameters((128,256), 4, 2,8, (64.,64.))
+    data_params=DatasetParameters((128,256), 4, 1, 1, (64.,64.))
     indices=get_indices_table(data_params)
     polar_params=set_default_polarisation_coefficients(indices)
     ker=CatmullRomSpline(Float64, Flat)
