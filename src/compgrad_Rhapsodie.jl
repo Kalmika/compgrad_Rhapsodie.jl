@@ -97,8 +97,11 @@ function comp_grad(x::AbstractArray{T,3}, D) where {T<:AbstractFloat}
     ga = copy(x)
      
     ga[:, :, 1] = g.I
-    ga[:, :, 2] = g.I + cos.(2*g.θ).*g.Q + sin.(2*g.θ).*g.U
-    ga[:, :, 3] = 2*S.Ip.*(-sin.(2*g.θ).*g.Q + cos.(2*g.θ).*g.U)
+    ga[:, :, 2] = g.I + cos.(2*S.θ).*g.Q + sin.(2*S.θ).*g.U
+    ga[:, :, 3] = 2*S.Ip.*(-sin.(2*S.θ).*g.Q + cos.(2*S.θ).*g.U)
+
+    #ga[:, :, 2] = g.I + cos.(2*x[:, :, 3]).*g.Q + sin.(2*x[:, :, 3]).*g.U
+    #ga[:, :, 3] = 2*S.Ip.*(-sin.(2*x[:, :, 3]).*g.Q + cos.(2*x[:, :, 3]).*g.U)
 
     return ga, chi2
 end
