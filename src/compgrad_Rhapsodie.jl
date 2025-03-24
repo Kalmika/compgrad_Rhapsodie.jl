@@ -10,7 +10,7 @@ using LinearAlgebra
 export comp_grad, init_rhapsodie, generate_star
 
 
-function init_rhapsodie(;α = 1.0, write_files=false, path_disk = "default")
+function init_rhapsodie(;alpha = 1.0, write_files=false, path_disk = "default")
     
     path = replace(pathof(compgrad_Rhapsodie), "src/compgrad_Rhapsodie.jl" => "data")
     (path_disk ==  "default") && (path_disk = path*"/sample_for_rhapsodie_128x128.h5")
@@ -26,7 +26,7 @@ function init_rhapsodie(;α = 1.0, write_files=false, path_disk = "default")
     θ = read(dset["disk_theta"])
     close(dset)
 
-    STAR = generate_star(object_params, α)
+    STAR = generate_star(object_params, alpha)
     
     S = PolarimetricMap("intensities", I - Ip, Ip, θ) + STAR
 
@@ -108,7 +108,7 @@ function comp_grad(x::AbstractArray{T,3}, D) where {T<:AbstractFloat}
     return ga, chi2
 end
 
-function generate_star(parameters::ObjectParameters, α=1.0)
+function generate_star(parameters::ObjectParameters, alpha=1.0)
 	Ip=zeros(parameters.size);
 	θ=zeros(parameters.size);
 	STAR1=zeros(parameters.size);
@@ -130,7 +130,7 @@ function generate_star(parameters::ObjectParameters, α=1.0)
 	#STAR[round(Int64,10*parameters.size[1]/16)-3,round(Int64,10*parameters.size[2]/16)]=20000.0;
 	#STAR[round(Int64,10*parameters.size[1]/16),round(Int64,10*parameters.size[2]/16)-3]=100000.0;
 
-    return PolarimetricMap("intensities", α*STAR, Ip, θ)
+    return PolarimetricMap("intensities", alpha*STAR, Ip, θ)
 end
 
 end # module compgrad_Rhapsodie
