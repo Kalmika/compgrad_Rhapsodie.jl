@@ -23,12 +23,10 @@ To call from python:
 from juliacall import Main as jl
 import numpy as np
 jl.seval("using compgrad_Rhapsodie")
-jl.seval("D = init_rhapsodie()")
+jl.seval("D,S,nAS = init_rhapsodie()")
 # compute grad at x
 x = np.random.uniform(low=0,high=1,size=(128,128,3))
 g, chi2 = jl.comp_grad(x, jl.D)
 # g is by default an Array. Convert to numpy array
 g = np.array(g)
-# generate star S and ||AS||^2
-S,α  = jl.generate_star(jl.D)
 ```
