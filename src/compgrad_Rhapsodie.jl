@@ -10,7 +10,7 @@ using LinearAlgebra
 export comp_grad, init_rhapsodie, generate_star
 
 
-function init_rhapsodie(; write_files=false, path_disk = "default")
+function init_rhapsodie(;α = 1.0, write_files=false, path_disk = "default")
     
     path = replace(pathof(compgrad_Rhapsodie), "src/compgrad_Rhapsodie.jl" => "data")
     (path_disk ==  "default") && (path_disk = path*"/sample_for_rhapsodie_128x128.h5")
@@ -26,7 +26,10 @@ function init_rhapsodie(; write_files=false, path_disk = "default")
     θ = read(dset["disk_theta"])
     close(dset)
 
-    S = PolarimetricMap("intensities", I - Ip, Ip, θ)
+    STAR = generate_star(object_params, α)
+    
+    S = PolarimetricMap("intensities", I - Ip, Ip, θ) + STAR
+
 
     # create model
     
@@ -82,8 +85,9 @@ function init_rhapsodie(; write_files=false, path_disk = "default")
     
     # DataSet for gradient computation
     D = Dataset(data, weight , H)
-    
-    return D
+    nAS = sum(abs2.(D.direct_model*STAR))
+
+    return D, STAR.I, nAS
 end
 
 function comp_grad(x::AbstractArray{T,3}, D) where {T<:AbstractFloat}  
@@ -104,8 +108,7 @@ function comp_grad(x::AbstractArray{T,3}, D) where {T<:AbstractFloat}
     return ga, chi2
 end
 
-function generate_star(D)
-    parameters=ObjectParameters((128,128),(64.,64.))
+function generate_star(parameters::ObjectParameters, α=1.0)
 	Ip=zeros(parameters.size);
 	θ=zeros(parameters.size);
 	STAR1=zeros(parameters.size);
@@ -127,8 +130,7 @@ function generate_star(D)
 	#STAR[round(Int64,10*parameters.size[1]/16)-3,round(Int64,10*parameters.size[2]/16)]=20000.0;
 	#STAR[round(Int64,10*parameters.size[1]/16),round(Int64,10*parameters.size[2]/16)-3]=100000.0;
 
-    S = PolarimetricMap("intensities", STAR, Ip, θ)
-    return S.I, sum(abs2.(D.direct_model*S))
+    return PolarimetricMap("intensities", α*STAR, Ip, θ)
 end
 
 end # module compgrad_Rhapsodie
