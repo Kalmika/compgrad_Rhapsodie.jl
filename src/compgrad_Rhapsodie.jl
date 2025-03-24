@@ -7,7 +7,7 @@ using InterpolationKernels
 using HDF5
 using LinearAlgebra
 
-export comp_grad, init_rhapsodie
+export comp_grad, init_rhapsodie, generate_star
 
 
 function init_rhapsodie(; write_files=false, path_disk = "default")
@@ -104,5 +104,31 @@ function comp_grad(x::AbstractArray{T,3}, D) where {T<:AbstractFloat}
     return ga, chi2
 end
 
+function generate_star(D)
+    parameters=ObjectParameters((128,128),(64.,64.))
+	Ip=zeros(parameters.size);
+	θ=zeros(parameters.size);
+	STAR1=zeros(parameters.size);
+	STAR2=zeros(parameters.size);
+	
+	for i=1:parameters.size[1]
+    	for j=1:parameters.size[2]
+			STAR1[i,j]=200*exp(-((i-parameters.center[1])^2+(j-parameters.center[2])^2)/(2*75^2))
+			STAR2[i,j]=100000*exp(-((i-parameters.center[1])^2+(j-parameters.center[2])^2)/(2*7^2))
+			if (((parameters.center[1]-i)^2+(parameters.center[2]-j)^2)<=10^2)
+        		STAR2[i,j]=800;
+    		end
+			if (((parameters.center[1]-i)^2+(parameters.center[2]-j)^2)<=70^2)
+        		STAR1[i,j]=50;		
+    		end
+		end
+	end    
+	STAR=STAR1+STAR2
+	#STAR[round(Int64,10*parameters.size[1]/16)-3,round(Int64,10*parameters.size[2]/16)]=20000.0;
+	#STAR[round(Int64,10*parameters.size[1]/16),round(Int64,10*parameters.size[2]/16)-3]=100000.0;
+
+    S = PolarimetricMap("intensities", STAR, Ip, θ)
+    return S.I, sum(abs2.(D.direct_model*S))
+end
 
 end # module compgrad_Rhapsodie
