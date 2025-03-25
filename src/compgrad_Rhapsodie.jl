@@ -85,7 +85,7 @@ function init_rhapsodie(;alpha = 1.0, write_files=false, path_disk = "default")
     
     # DataSet for gradient computation
     D = Dataset(data, weight , H)
-    nAS = sum(abs2.(D.direct_model*STAR))
+    nAS = sum(D.weights .* abs2.(D.direct_model*STAR))
 
     return D, STAR.I, nAS
 end
