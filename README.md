@@ -11,7 +11,7 @@ Pkg.add(url="https://github.com/andferrari/compgrad_Rhapsodie.jl.git")
 #
 # to test first init:
 using compgrad_Rhapsodie
-D = init_rhapsodie()
+D = init_rhapsodie2()
 #
 # and then compute the gradient:
 x = randn(128,128,3)
@@ -23,7 +23,7 @@ To call from python:
 from juliacall import Main as jl
 import numpy as np
 jl.seval("using compgrad_Rhapsodie")
-jl.seval("D,S,nAS = init_rhapsodie()")
+jl.seval("D,S,nAS = init_rhapsodie2()")
 # compute grad at x
 x = np.random.uniform(low=0,high=1,size=(128,128,3))
 g, chi2 = jl.comp_grad(x, jl.D)
