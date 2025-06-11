@@ -1,7 +1,7 @@
 using compgrad_Rhapsodie
 using HDF5
 
-D = init_rhapsodie()
+D, S, nAS = init_rhapsodie()
 
 path = replace(pathof(compgrad_Rhapsodie), "src/compgrad_Rhapsodie.jl" => "data")
 path_disk = path*"/sample_for_rhapsodie_128x128.h5"

@@ -383,7 +383,7 @@ version = "3.7.2"
 
 [[deps.RhapsodieDirect]]
 deps = ["EasyFITS", "FFTW", "InterpolationKernels", "LazyAlgebra", "LinearInterpolators", "TwoDimensional"]
-git-tree-sha1 = "d0fee8424de3a6d74a2d2b78b497f989083cd1c7"
+git-tree-sha1 = "71df8050701c5e4938d08c5379550ecf95010411"
 repo-rev = "main"
 repo-url = "https://github.com/LaurenceDenneulin/RhapsodieDirect.git"
 uuid = "0ed9b2bd-c76c-4f1a-94cb-965bde98f638"
