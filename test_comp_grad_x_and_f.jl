@@ -5,11 +5,6 @@ using Plots
 using Statistics
 using Printf
 
-# Remove warnings
-ENV["JULIA_WARN_OVERWRITE"] = "0"
-import Logging
-Logging.disable_logging(Logging.Warn)
-
 function test_joint_estimation_functions()
     println("=== Test des nouvelles fonctions d'estimation conjointe ===\n")
     

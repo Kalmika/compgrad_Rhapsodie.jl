@@ -3,11 +3,6 @@ using HDF5
 using Plots
 using Printf
 
-# Remove warnings
-ENV["JULIA_WARN_OVERWRITE"] = "0"
-import Logging
-Logging.disable_logging(Logging.Warn)
-
 function test_comp_grad()
 
     # Initialize Rhapsodie system with proper arguments
