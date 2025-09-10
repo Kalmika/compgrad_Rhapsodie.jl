@@ -38,7 +38,7 @@ Q_map = zeros(object_params.size)
 U_map = zeros(object_params.size)
 
 center_x, center_y = round.(Int, object_params.center)
-half_size = 20
+half_size = 1
 y_range = (center_y - half_size):(center_y + half_size)
 x_range = (center_x - half_size):(center_x + half_size)
 
@@ -67,11 +67,15 @@ H_noblur = RhapsodieDirect.DirectModel(size(test_object), (128, 256, 4), test_ob
 
 # --- 4. Application des modèles et reconstruction des cartes de Stokes ---
 println("Application des modèles et reconstruction des cartes de Stokes...")
-model_blurred_data = H * test_object
-model_sharp_data = H_noblur * test_object
 
-recons_blurred = H' * model_blurred_data
-recons_sharp = H_noblur' * model_sharp_data
+recons_blurred = H * test_object
+recons_sharp = H_noblur * test_object
+
+
+v_min, v_max = extrema(recons_sharp[:,:,1])
+plot(heatmap(recons_blurred[:,:,1], title="Carte I floutée", c=:viridis, aspect_ratio=1, clims=(v_min, v_max)),
+     heatmap(recons_sharp[:,:,1], title="Carte I nette", c=:viridis, aspect_ratio=1, clims=(v_min, v_max)),
+     layout=(1, 2), size=(1000, 500))
 
 # --- 5. Fonction d'aide pour la visualisation ---
 function create_comparison_plot(map_sharp, map_blurred, map_title, suptitle_text)

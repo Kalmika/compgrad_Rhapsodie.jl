@@ -1103,9 +1103,7 @@ weakdeps = ["Distributed"]
 
 [[deps.RhapsodieDirect]]
 deps = ["EasyFITS", "FFTW", "InterpolationKernels", "LazyAlgebra", "LinearInterpolators", "TwoDimensional"]
-git-tree-sha1 = "71df8050701c5e4938d08c5379550ecf95010411"
-repo-rev = "main"
-repo-url = "https://github.com/LaurenceDenneulin/RhapsodieDirect.git"
+path = "/home/qvillegas/WORK/Fork/RhapsodieDirect"
 uuid = "0ed9b2bd-c76c-4f1a-94cb-965bde98f638"
 version = "0.1.0"
 
