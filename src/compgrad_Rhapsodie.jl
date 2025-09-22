@@ -7,14 +7,44 @@ using InterpolationKernels
 using HDF5
 using LinearAlgebra
 
-export comp_grad, comp_grad2, init_rhapsodie, generate_star, init_rhapsodie2, comp_residual, comp_grad_x, comp_grad_f, comp_joint_evaluation, init_rhapsodie_leakage, comp_grad_speckle_scalar_leakage, comp_grad_disk_scalar_leakage
+export 
+    comp_grad, comp_grad2, 
+    init_rhapsodie, generate_star, 
+    init_rhapsodie2, 
+    comp_residual, 
+    comp_grad_x, 
+    comp_grad_f, 
+    comp_joint_evaluation, 
+    init_rhapsodie_leakage, 
+    comp_grad_speckle_scalar_leakage, 
+    comp_grad_disk_scalar_leakage, 
+    string_to_noise_model
 
-function init_rhapsodie_leakage(;alpha = 1e-2, write_files=false, data_folder = "default")
+function string_to_noise_model(noise_model_str::String, size::Int = 128, star_max_intensity::Float64 = 1.0)
+    noise_type = lowercase(strip(noise_model_str))    
+    if noise_type == "correlated"
+        amplitude = 50000.0
+        filter_size = 1.5
+        model = CorrelatedNoise(amplitude, filter_size, size)
+        println("CorrelatedNoise selected with amplitude: $amplitude, filter_size: $filter_size, size: $size (star max: $star_max_intensity)")
+    else
+        model = RhapsodieDirect.DiagonalNoise()
+        println("DiagonalNoise selected with size: $size")
+    end
+    
+    return model
+end
+
+function init_rhapsodie_leakage(;alpha = 1e-2, write_files=false, data_folder = "default", noise_model_str::String = "diagonal")
     
     (data_folder ==  "default") && (data_folder = replace(pathof(compgrad_Rhapsodie), "src/compgrad_Rhapsodie.jl" => "data"))
     path_disk = data_folder*"/sample_for_rhapsodie_128x128.h5"
     path_star = data_folder*"/star_cropped.fits"
     ker = CatmullRomSpline(Float64, Flat)
+
+    println("Paths:")
+    println("path_disk: ", path_disk)
+    println("path_star: ", path_star)
 
     # --- 1. Chargement des données et paramètres ---
     println("Chargement des données...")
@@ -28,13 +58,16 @@ function init_rhapsodie_leakage(;alpha = 1e-2, write_files=false, data_folder = 
 
     STAR_intensity = readfits(path_star)
     coef_disk = alpha*maximum(STAR_intensity)/maximum(I_disk)
+    
+    # Convert string to NoiseModel for Python compatibility
+    noise_model = string_to_noise_model(noise_model_str, object_params.size[1], maximum(STAR_intensity))
 
     # Objet ciel complet (disque + étoile) pour la simulation
     S_disk = PolarimetricMap("intensities", coef_disk*(I_disk - Ip_disk), coef_disk*Ip_disk, θ_disk) 
     S_star = PolarimetricMap("intensities",  STAR_intensity, zero(STAR_intensity), zero(STAR_intensity)) 
 
     # --- 2. Construction des modèles directs (A et A') ---
-    println("Construction des modèles directs...")
+    println("Construction des modèles directs2...")
     data_params=DatasetParameters((128,256), 4, 1, 1, (64.,64.))
     indices=get_indices_table(data_params)
     polar_params=set_default_polarisation_coefficients(indices)
@@ -56,10 +89,10 @@ function init_rhapsodie_leakage(;alpha = 1e-2, write_files=false, data_folder = 
     H_noblur = DirectModel(size(S_disk), (128,256,4), S_disk.parameter_type, field_transforms)
 
     # --- 3. Simulation des données observées ---
-    println("Simulation des données observées...")
+    println("Simulation des données observées2...")
     BadPixMap = Float64.(rand(0.0:1e-16:1.0, data_params.size) .< 0.9);
-    # data, weight, M, M_disk, M_star = data_simulator_dual_component(BadPixMap, field_transforms, S_disk, S_star; A_disk=blur);
-    data, weight = data_simulator_dual_component(BadPixMap, field_transforms, S_disk, S_star; A_disk=blur);
+    # data, weight = data_simulator_dual_component_bis(BadPixMap, field_transforms, S_disk, S_star; A_disk=blur);
+    data, weight = data_simulator_dual_component_bis(BadPixMap, field_transforms, S_disk, S_star; A_disk=blur, noise_model=noise_model);
     
     # Le Dataset contient le modèle COMPLET H (A)
     D = Dataset(data, weight, H)
@@ -74,7 +107,7 @@ function init_rhapsodie_leakage(;alpha = 1e-2, write_files=false, data_folder = 
     # Norme : ||A'*s||^2_W
     # Note: On utilise ici la réponse de l'étoile NON pondérée par lambda.
     # Si votre nAS doit inclure lambda, changez `AS_noblur` en `leakage_term` ci-dessous.
-    nAS = sum(D.weights .* abs2.(AS_noblur))
+    nAS = sum(D.weights_op * abs2.(AS_noblur))
 
     # --- 5. Sauvegarde optionnelle et retour ---
     if write_files == true
@@ -168,7 +201,7 @@ function init_rhapsodie2(;alpha = 1e-2, write_files=false, data_folder = "defaul
     AS_noblur = H_noblur * STAR_p
     
     # Calcul de la norme pondérée ||A*S||^2_W
-    nAS = sum(D.weights .* abs2.(AS_noblur))
+    nAS = sum(D.weights_op .* abs2.(AS_noblur))
     # --- MODIFICATION END ---
 
 
@@ -267,7 +300,7 @@ function init_rhapsodie(;alpha = 1.0, write_files=false, path_disk = "default")
     
     # DataSet for gradient computation
     D = Dataset(data, weight , H)
-    nAS = sum(D.weights .* abs2.(D.direct_model*STAR))
+    nAS = sum(D.weights_op .* abs2.(D.direct_model*STAR))
 
     return D, STAR.I, nAS
 end
@@ -276,7 +309,7 @@ function comp_grad(x::AbstractArray{T,3}, D) where {T<:AbstractFloat}
     S = PolarimetricMap("intensities", x[:, :, 1] - x[:, :, 2], x[:, :, 2], x[:, :, 3])
     g = copy(S)
     res = D.direct_model*S - D.data
-    wres = D.weights .* res
+    wres = D.weights_op .* res
     apply!(g, D.direct_model', wres)
     chi2 = dot(res,wres)
 
@@ -310,12 +343,12 @@ function comp_grad_disk_scalar_leakage(x::AbstractArray{T,3}, alpha_s::T, leakag
     residual = Ax .+ alpha_s*leakage .- D.data
     
     # 4. Ajout du terme de régularisation gamma si différent de zéro
-    if gamma != zero(T)
-        residual = residual ./ (1 .+ gamma^2 .* D.weights)
+    if gamma != zero(T) # TODO....
+        residual = residual ./ (1 .+ gamma^2 * D.weights_op)
     end
     
     # 5. Appliquer les poids
-    weighted_residual = D.weights .* residual
+    weighted_residual = D.weights_op * residual
     
     # 6. Calculer le chi-deux
     chi2 = dot(residual, weighted_residual)
@@ -353,7 +386,7 @@ function comp_grad_speckle_scalar_leakage(x::AbstractArray{T,3}, D, D2) where {T
     residual = Ax .- D.data
     
     # 5. Appliquer les poids
-    weighted_residual = D.weights .* residual
+    weighted_residual = D.weights_op * residual
 
     # 6. Calculer le chi-deux
     chi2 = dot(residual, weighted_residual)
@@ -426,7 +459,7 @@ function comp_grad_scalar_leakage_alpha_star(x::AbstractArray{T,3}, alpha_s::T, 
     # Norme : ||A'*s||^2_W
     # Note: On utilise ici la réponse de l'étoile NON pondérée par lambda.
     # Si votre nAS doit inclure lambda, changez `AS_noblur` en `leakage_term` ci-dessous.
-    nAS = sum(D.weights .* abs2.(AS_noblur))
+    nAS = sum(D.weights_op .* abs2.(AS_noblur))
 
     # --- 5. Sauvegarde optionnelle et retour ---
     if write_files == true
@@ -444,7 +477,7 @@ function comp_grad2(x::AbstractArray{T,3}, D) where {T<:AbstractFloat}
     S = PolarimetricMap("intensities", x[:, :, 1] - x[:, :, 2], x[:, :, 2], x[:, :, 3])
     g = copy(S)
     res = D.direct_model*S - D.data
-    wres = D.weights .* res
+    wres = D.weights_op .* res
     apply!(g, D.direct_model', wres)
     chi2 = dot(res,wres)
 
@@ -500,7 +533,7 @@ function comp_grad_x(x::AbstractArray{T,3}, f::AbstractArray{T,3}, D) where {T<:
     residual = comp_residual(x, f, D)
     
     # Apply weights
-    weighted_residual = D.weights .* residual
+    weighted_residual = D.weights_op .* residual
     
     # Compute chi-square for monitoring
     chi2 = dot(residual, weighted_residual)
@@ -533,7 +566,7 @@ function comp_grad_f(x::AbstractArray{T,3}, f::AbstractArray{T,3}, D) where {T<:
     residual = comp_residual(x, f, D)
     
     # Apply weights - this IS the gradient with respect to f
-    grad_f = D.weights .* residual
+    grad_f = D.weights_op .* residual
     
     # Compute chi-square for monitoring
     chi2 = dot(residual, grad_f)
@@ -558,7 +591,7 @@ function comp_joint_evaluation(x::AbstractArray{T,3}, f::AbstractArray{T,3}, D) 
     """
     # Compute residual once using the corrected comp_residual
     residual = comp_residual(x, f, D)
-    weighted_residual = D.weights .* residual
+    weighted_residual = D.weights_op .* residual
     chi2 = dot(residual, weighted_residual)
     
     # Gradient with respect to x: A^T * W * residual

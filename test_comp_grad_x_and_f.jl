@@ -91,7 +91,7 @@ function test_joint_estimation_functions()
     
     function objective(x_test, f_test)
         residual_test = comp_residual(x_test, f_test, D)
-        return 0.5 * dot(residual_test, D.weights .* residual_test)
+        return 0.5 * dot(residual_test, D.weights_op .* residual_test)
     end
     
     # Test gradient with respect to x
@@ -200,12 +200,12 @@ function test_gradient_descent(n_iterations=1000; lr_x=0.01, lr_f=0.001, plot_re
     y_synthetic = residual_true + D.data  # This gives us A*x_true + f_true
     
     # Replace D.data with synthetic data
-    D_synthetic = Dataset(y_synthetic, D.weights, D.direct_model)
+    D_synthetic = Dataset(y_synthetic, D.weights_op, D.direct_model)
     
     # Add some noise
     noise_level = 0.05 * std(y_synthetic)
     y_noisy = y_synthetic + noise_level * randn(size(y_synthetic))
-    D_noisy = Dataset(y_noisy, D.weights, D.direct_model)
+    D_noisy = Dataset(y_noisy, D.weights_op, D.direct_model)
     
     println("   - Niveau de bruit: $(noise_level)")
     
