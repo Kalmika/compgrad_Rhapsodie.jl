@@ -20,13 +20,11 @@ export
     comp_grad_disk_scalar_leakage, 
     string_to_noise_model
 
-function string_to_noise_model(noise_model_str::String, size::Int = 128, star_max_intensity::Float64 = 1.0)
+function string_to_noise_model(noise_model_str::String, size::Int = 128, star_max_intensity::Float64 = 1.0, corr_amplitude::Float64 = 50000.0, corr_filter_size::Float64 = 1.5)
     noise_type = lowercase(strip(noise_model_str))    
     if noise_type == "correlated"
-        amplitude = 50000.0
-        filter_size = 1.5
-        model = CorrelatedNoise(amplitude, filter_size, size)
-        println("CorrelatedNoise selected with amplitude: $amplitude, filter_size: $filter_size, size: $size (star max: $star_max_intensity)")
+        model = CorrelatedNoise(corr_amplitude, corr_filter_size, size)
+        println("CorrelatedNoise selected with amplitude: $corr_amplitude, filter_size: $corr_filter_size, size: $size (star max: $star_max_intensity)")
     else
         model = RhapsodieDirect.DiagonalNoise()
         println("DiagonalNoise selected with size: $size")
@@ -35,7 +33,8 @@ function string_to_noise_model(noise_model_str::String, size::Int = 128, star_ma
     return model
 end
 
-function init_rhapsodie_leakage(;alpha = 1e-2, write_files=false, data_folder = "default", noise_model_str::String = "diagonal")
+function init_rhapsodie_leakage(;alpha = 1e-2, write_files=false, data_folder = "default", noise_model_str::String = "diagonal", corr_amplitude::Float64 = 50000.0, corr_filter_size::Float64 = 1.5,
+    reg_param_relative::Float64=1e-3)
     
     (data_folder ==  "default") && (data_folder = replace(pathof(compgrad_Rhapsodie), "src/compgrad_Rhapsodie.jl" => "data"))
     path_disk = data_folder*"/sample_for_rhapsodie_128x128.h5"
@@ -60,14 +59,14 @@ function init_rhapsodie_leakage(;alpha = 1e-2, write_files=false, data_folder = 
     coef_disk = alpha*maximum(STAR_intensity)/maximum(I_disk)
     
     # Convert string to NoiseModel for Python compatibility
-    noise_model = string_to_noise_model(noise_model_str, object_params.size[1], maximum(STAR_intensity))
+    println("-> noise_model_str: ", noise_model_str)
+    noise_model = string_to_noise_model(noise_model_str, object_params.size[1], maximum(STAR_intensity), corr_amplitude, corr_filter_size)
 
     # Objet ciel complet (disque + étoile) pour la simulation
     S_disk = PolarimetricMap("intensities", coef_disk*(I_disk - Ip_disk), coef_disk*Ip_disk, θ_disk) 
     S_star = PolarimetricMap("intensities",  STAR_intensity, zero(STAR_intensity), zero(STAR_intensity)) 
 
     # --- 2. Construction des modèles directs (A et A') ---
-    println("Construction des modèles directs2...")
     data_params=DatasetParameters((128,256), 4, 1, 1, (64.,64.))
     indices=get_indices_table(data_params)
     polar_params=set_default_polarisation_coefficients(indices)
@@ -89,17 +88,15 @@ function init_rhapsodie_leakage(;alpha = 1e-2, write_files=false, data_folder = 
     H_noblur = DirectModel(size(S_disk), (128,256,4), S_disk.parameter_type, field_transforms)
 
     # --- 3. Simulation des données observées ---
-    println("Simulation des données observées2...")
     BadPixMap = Float64.(rand(0.0:1e-16:1.0, data_params.size) .< 0.9);
     # data, weight = data_simulator_dual_component_bis(BadPixMap, field_transforms, S_disk, S_star; A_disk=blur);
-    data, weight = data_simulator_dual_component_bis(BadPixMap, field_transforms, S_disk, S_star; A_disk=blur, noise_model=noise_model);
+    data, weights_operator = data_simulator_dual_component_bis(BadPixMap, field_transforms, S_disk, S_star; A_disk=blur, noise_model=noise_model, reg_param_relative=reg_param_relative);
     
     # Le Dataset contient le modèle COMPLET H (A)
-    D = Dataset(data, weight, H)
-    Dstar = Dataset(data, weight, H_noblur)
+    D = Dataset(data, weights_operator, H)
+    Dstar = Dataset(data, weights_operator, H_noblur)
 
     # --- 4. Pré-calcul des termes liés à l'étoile (s) ---
-    println("Pré-calcul des termes de fuite stellaire...")
 
     # Calcul de A'*s
     AS_noblur = H_noblur * S_star
@@ -344,7 +341,8 @@ function comp_grad_disk_scalar_leakage(x::AbstractArray{T,3}, alpha_s::T, leakag
     
     # 4. Ajout du terme de régularisation gamma si différent de zéro
     if gamma != zero(T) # TODO....
-        residual = residual ./ (1 .+ gamma^2 * D.weights_op)
+        # residual = residual ./ (1 .+ gamma^2 * D.weights_op)
+        residual = residual ./ (1 .+ gamma^2 .* D.weights_op)
     end
     
     # 5. Appliquer les poids
