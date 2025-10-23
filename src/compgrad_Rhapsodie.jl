@@ -18,7 +18,18 @@ export
     init_rhapsodie_leakage, 
     comp_grad_speckle_scalar_leakage, 
     comp_grad_disk_scalar_leakage, 
-    string_to_noise_model
+    PolarimetricMap, 
+    string_to_noise_model,
+    apply_direct_model, 
+    apply_direct_model_transpose
+
+function apply_direct_model(input_vector, julia_dataset)
+    return julia_dataset.direct_model * input_vector
+end
+
+function apply_direct_model_transpose(input_measurement_vector::AbstractArray{T,3}, julia_dataset) where {T<:AbstractFloat}
+    return julia_dataset.direct_model' * input_measurement_vector
+end
 
 function string_to_noise_model(noise_model_str::String, size::Int = 128, star_max_intensity::Float64 = 1.0, corr_amplitude::Float64 = 50000.0, corr_filter_size::Float64 = 1.5)
     noise_type = lowercase(strip(noise_model_str))    
@@ -50,9 +61,10 @@ function init_rhapsodie_leakage(;alpha = 1e-2, write_files=false, data_folder = 
     object_params=ObjectParameters((128,128),(64.,64.))
 
     dset = h5open(path_disk, "r")
-    I_disk = read(dset["disk_data"])[:,:,1]
-    Ip_disk = read(dset["disk_data"])[:,:,2]
-    θ_disk = read(dset["disk_theta"])
+    # permutedims because Julia h5open open in column-major order
+    I_disk = permutedims(read(dset["disk_data"])[:,:,1], (2, 1))
+    Ip_disk = permutedims(read(dset["disk_data"])[:,:,2], (2, 1))
+    θ_disk = permutedims(read(dset["disk_theta"]), (2, 1))
     close(dset)
 
     STAR_intensity = readfits(path_star)
@@ -113,7 +125,7 @@ function init_rhapsodie_leakage(;alpha = 1e-2, write_files=false, data_folder = 
     
     println("Initialisation terminée.!")
     # On retourne D (avec H), l'intensité de l'étoile, le terme de fuite et nAS.
-    return D, Dstar, S_star.I, AS_noblur, nAS
+    return D, Dstar, S_star.I, AS_noblur, nAS, S_disk
 end
 
 # init_rhapsodie : L'étoile (STAR) est ajoutée directement au disque. L'intensité de l'étoile est contrôlée par un simple facteur d'échelle alpha. C'est une composition physique simple.
@@ -342,6 +354,53 @@ function comp_grad_disk_scalar_leakage(x::AbstractArray{T,3}, alpha_s::T, leakag
     # 4. Ajout du terme de régularisation gamma si différent de zéro
     if gamma != zero(T) # TODO....
         # residual = residual ./ (1 .+ gamma^2 * D.weights_op)
+        residual_gamma = residual ./ (1 .+ gamma^2 * D.weights_op.weights)
+    end
+
+    # 5. Appliquer les poids
+    weighted_residual = D.weights_op.weights .* residual_gamma
+    
+    # 6. Calculer le chi-deux
+    chi2 = dot(residual_gamma, weighted_residual)
+    
+    # 7. Appliquer l'adjoint : A^T * (weighted_residual)
+    apply!(g, D.direct_model', weighted_residual)
+    
+    # 8. Transformer le gradient au format tableau
+    grad_x = transform_polarimetric_to_array(g, S_disk, x)
+    
+    return grad_x, chi2
+end
+
+
+
+function apply_(x::AbstractArray{T,3}, alpha_s::T, leakage::AbstractArray{T,3}, D; gamma::T = zero(T)) where {T<:AbstractFloat}  
+    """
+    Compute gradient with respect to x: A^T * W * (A*x + leakage - y)
+    
+    Args:
+        x: Disk parameters (Iu, Ip, θ) - shape (H, W, 3)
+        D: Dataset containing data, weights, and the FULL direct_model (A)
+        leakage: Pre-computed leakage term (lambda * A' * s)
+        gamma: Optional regularization parameter (default: zero)
+        
+    Returns:
+        gradient: Gradient with respect to x
+        chi2: Chi-square value
+    """
+    # 1. Convertir x en PolarimetricMap
+    S_disk = PolarimetricMap("intensities", x[:, :, 1] - x[:, :, 2], x[:, :, 2], x[:, :, 3])
+    g = copy(S_disk)
+    
+    # 2. Calculer A*x (en utilisant le modèle AVEC flou de D)
+    Ax = D.direct_model * S_disk
+    
+    # 3. Calculer le résidu : A*x + (lambda(alpha_s) * A'*s) - y
+    residual = Ax .+ alpha_s*leakage .- D.data
+    
+    # 4. Ajout du terme de régularisation gamma si différent de zéro
+    if gamma != zero(T) # TODO....
+        # residual = residual ./ (1 .+ gamma^2 * D.weights_op)
         residual = residual ./ (1 .+ gamma^2 .* D.weights_op)
     end
     
@@ -359,6 +418,7 @@ function comp_grad_disk_scalar_leakage(x::AbstractArray{T,3}, alpha_s::T, leakag
     
     return grad_x, chi2
 end
+
 
 function comp_grad_speckle_scalar_leakage(x::AbstractArray{T,3}, D, D2) where {T<:AbstractFloat}  
     """
