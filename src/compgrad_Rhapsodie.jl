@@ -31,11 +31,14 @@ function apply_direct_model_transpose(input_measurement_vector::AbstractArray{T,
     return julia_dataset.direct_model' * input_measurement_vector
 end
 
-function string_to_noise_model(noise_model_str::String, size::Int = 128, star_max_intensity::Float64 = 1.0, corr_amplitude::Float64 = 50000.0, corr_filter_size::Float64 = 1.5)
+function string_to_noise_model(noise_model_str::String, size::Int = 128, star_max_intensity::Float64 = 1.0, corr_amplitude::Float64 = 0.0, corr_filter_size::Float64 = 1.5)
     noise_type = lowercase(strip(noise_model_str))    
     if noise_type == "correlated"
-        model = CorrelatedNoise(corr_amplitude, corr_filter_size, size)
+        model = RhapsodieDirect.CorrelatedNoise(corr_amplitude, corr_filter_size, size)
         println("CorrelatedNoise selected with amplitude: $corr_amplitude, filter_size: $corr_filter_size, size: $size (star max: $star_max_intensity)")
+    elseif noise_type == "diagonal_and_correlated"
+        model = RhapsodieDirect.DiagonalAndCorrelatedNoise(corr_amplitude, corr_filter_size, size)
+        println("DiagonalAndCorrelatedNoise selected with amplitude: $corr_amplitude, filter_size: $corr_filter_size, size: $size (star max: $star_max_intensity)")
     else
         model = RhapsodieDirect.DiagonalNoise()
         println("DiagonalNoise selected with size: $size")
@@ -44,7 +47,7 @@ function string_to_noise_model(noise_model_str::String, size::Int = 128, star_ma
     return model
 end
 
-function init_rhapsodie_leakage(;alpha = 1e-2, write_files=false, data_folder = "default", noise_model_str::String = "diagonal", corr_amplitude::Float64 = 50000.0, corr_filter_size::Float64 = 1.5,
+function init_rhapsodie_leakage(;alpha = 1e-2, write_files=false, data_folder = "default", noise_model_str::String = "diagonal", corr_amplitude::Float64 = 0.0, corr_filter_size::Float64 = 1.5,
     reg_param_relative::Float64=1e-3)
     
     (data_folder ==  "default") && (data_folder = replace(pathof(compgrad_Rhapsodie), "src/compgrad_Rhapsodie.jl" => "data"))
@@ -85,7 +88,8 @@ function init_rhapsodie_leakage(;alpha = 1e-2, write_files=false, data_folder = 
     
     field_params=FieldTransformParameters[]
     for i=1:data_params.frames_total
-        push!(field_params, FieldTransformParameters(ker, 0., (0.,0.), (-10.7365 , 1.39344), polar_params[i][1], polar_params[i][2]))
+        # push!(field_params, FieldTransformParameters(ker, 0., (0.,0.), (-10.7365 , 1.39344), polar_params[i][1], polar_params[i][2]))
+        push!(field_params, FieldTransformParameters(ker, 0., (0.,0.), (0.,0.), polar_params[i][1], polar_params[i][2]))
     end
     field_transforms = load_field_transforms(object_params, data_params, field_params)
    
@@ -100,7 +104,7 @@ function init_rhapsodie_leakage(;alpha = 1e-2, write_files=false, data_folder = 
     H_noblur = DirectModel(size(S_disk), (128,256,4), S_disk.parameter_type, field_transforms)
 
     # --- 3. Simulation des données observées ---
-    BadPixMap = Float64.(rand(0.0:1e-16:1.0, data_params.size) .< 0.9);
+    BadPixMap = Float64.(rand(0.0:1e-16:1.0, data_params.size) .< 10.9); #TODO modif
     # data, weight = data_simulator_dual_component_bis(BadPixMap, field_transforms, S_disk, S_star; A_disk=blur);
     data, weights_operator = data_simulator_dual_component_bis(BadPixMap, field_transforms, S_disk, S_star; A_disk=blur, noise_model=noise_model, reg_param_relative=reg_param_relative);
     
