@@ -21,46 +21,69 @@ export
     PolarimetricMap, 
     string_to_noise_model,
     apply_direct_model, 
-    apply_direct_model_transpose
+    apply_direct_model_transpose,
+    apply_direct_model_inverse,
+    get_polar_params
 
-function apply_direct_model(input_vector, julia_dataset)
-    return julia_dataset.direct_model * input_vector
+function get_polar_params()
+    data_params=DatasetParameters((128,256), 4, 1, 1, (64.,64.))
+    indices=get_indices_table(data_params)
+    return set_default_polarisation_coefficients(indices)
 end
 
-function apply_direct_model_transpose(input_measurement_vector::AbstractArray{T,3}, julia_dataset) where {T<:AbstractFloat}
-    return julia_dataset.direct_model' * input_measurement_vector
+function apply_direct_model(input_array::AbstractArray{T,3}, julia_direct_model::DirectModel{T}) where {T<:AbstractFloat}
+    S = PolarimetricMap("intensities", input_array[1, :, :] - input_array[2, :, :], input_array[2, :, :], input_array[3, :, :])
+    return julia_direct_model * S
 end
 
-function string_to_noise_model(noise_model_str::String, size::Int = 128, star_max_intensity::Float64 = 1.0, corr_amplitude::Float64 = 0.0, corr_filter_size::Float64 = 1.5)
+function apply_direct_model_transpose(input_measurement_vector::AbstractArray{T,3}, julia_direct_model::DirectModel) where {T<:AbstractFloat}
+    return julia_direct_model' * input_measurement_vector
+end
+
+function apply_direct_model_inverse(input_measurement_vector::AbstractArray{T,3}, julia_direct_model::DirectModel) where {T<:AbstractFloat}
+    return julia_direct_model \ input_measurement_vector
+end
+
+function string_to_noise_model(noise_model_str::String, size::Int = 128, star_max_intensity::Float64 = 1.0, corr_amplitude::Float64 = 0.0, corr_filter_size::Float64 = 1.5, verbose::Bool = true)
     noise_type = lowercase(strip(noise_model_str))    
     if noise_type == "correlated"
         model = RhapsodieDirect.CorrelatedNoise(corr_amplitude, corr_filter_size, size)
-        println("CorrelatedNoise selected with amplitude: $corr_amplitude, filter_size: $corr_filter_size, size: $size (star max: $star_max_intensity)")
+        if verbose
+            println("CorrelatedNoise selected with amplitude: $corr_amplitude, filter_size: $corr_filter_size, size: $size (star max: $star_max_intensity)")
+        end
     elseif noise_type == "diagonal_and_correlated"
         model = RhapsodieDirect.DiagonalAndCorrelatedNoise(corr_amplitude, corr_filter_size, size)
-        println("DiagonalAndCorrelatedNoise selected with amplitude: $corr_amplitude, filter_size: $corr_filter_size, size: $size (star max: $star_max_intensity)")
+        if verbose
+            println("DiagonalAndCorrelatedNoise selected with amplitude: $corr_amplitude, filter_size: $corr_filter_size, size: $size (star max: $star_max_intensity)")
+        end
     else
         model = RhapsodieDirect.DiagonalNoise()
-        println("DiagonalNoise selected with size: $size")
+        if verbose
+            println("DiagonalNoise selected with size: $size")
+        end
     end
     
     return model
 end
 
 function init_rhapsodie_leakage(;alpha = 1e-2, write_files=false, data_folder = "default", noise_model_str::String = "diagonal", corr_amplitude::Float64 = 0.0, corr_filter_size::Float64 = 1.5,
-    reg_param_relative::Float64=1e-3)
+    reg_param_relative::Float64 = 1e-3, verbose::Bool = true, is_zero_star::Bool = false, is_zero_disk::Bool = false)
     
     (data_folder ==  "default") && (data_folder = replace(pathof(compgrad_Rhapsodie), "src/compgrad_Rhapsodie.jl" => "data"))
     path_disk = data_folder*"/sample_for_rhapsodie_128x128.h5"
     path_star = data_folder*"/star_cropped.fits"
     ker = CatmullRomSpline(Float64, Flat)
 
-    println("Paths:")
-    println("path_disk: ", path_disk)
-    println("path_star: ", path_star)
+    if verbose
+        println("Paths:")
+        println("path_disk: ", path_disk)
+        println("path_star: ", path_star)
+    end
 
     # --- 1. Chargement des données et paramètres ---
-    println("Chargement des données...")
+    if verbose
+        println("Chargement des données...")
+    end
     object_params=ObjectParameters((128,128),(64.,64.))
 
     dset = h5open(path_disk, "r")
@@ -73,13 +96,17 @@ function init_rhapsodie_leakage(;alpha = 1e-2, write_files=false, data_folder = 
     STAR_intensity = readfits(path_star)
     coef_disk = alpha*maximum(STAR_intensity)/maximum(I_disk)
     
-    # Convert string to NoiseModel for Python compatibility
-    println("-> noise_model_str: ", noise_model_str)
-    noise_model = string_to_noise_model(noise_model_str, object_params.size[1], maximum(STAR_intensity), corr_amplitude, corr_filter_size)
+    # Convert string to NoiseModel for Python compatibility    
+    if verbose
+        println("-> noise_model_str: ", noise_model_str)
+    end
+    noise_model = string_to_noise_model(noise_model_str, object_params.size[1], maximum(STAR_intensity), corr_amplitude, corr_filter_size, verbose)
 
     # Objet ciel complet (disque + étoile) pour la simulation
     S_disk = PolarimetricMap("intensities", coef_disk*(I_disk - Ip_disk), coef_disk*Ip_disk, θ_disk) 
+    is_zero_disk && (S_disk = PolarimetricMap("intensities", zero(I_disk), zero(I_disk), zero(I_disk)))
     S_star = PolarimetricMap("intensities",  STAR_intensity, zero(STAR_intensity), zero(STAR_intensity)) 
+    is_zero_star && (S_star = PolarimetricMap("intensities", zero(STAR_intensity), zero(STAR_intensity), zero(STAR_intensity)))
 
     # --- 2. Construction des modèles directs (A et A') ---
     data_params=DatasetParameters((128,256), 4, 1, 1, (64.,64.))
@@ -117,6 +144,14 @@ function init_rhapsodie_leakage(;alpha = 1e-2, write_files=false, data_folder = 
     # Calcul de A'*s
     AS_noblur = H_noblur * S_star
 
+    # star_128_256 = zeros(128, 256)
+    # star_128_256[:, 1:128] .= S_star_I
+    # star_128_256[:, 128:256] .= S_star_I
+
+    # S_star_3 = zeros(128,128,3)
+    # S_star_3[:,:,1] = S_star_I
+
+
     # Norme : ||A'*s||^2_W
     # Note: On utilise ici la réponse de l'étoile NON pondérée par lambda.
     # Si votre nAS doit inclure lambda, changez `AS_noblur` en `leakage_term` ci-dessous.
@@ -127,7 +162,6 @@ function init_rhapsodie_leakage(;alpha = 1e-2, write_files=false, data_folder = 
         # ... (code de sauvegarde inchangé) ...
     end
     
-    println("Initialisation terminée.!")
     # On retourne D (avec H), l'intensité de l'étoile, le terme de fuite et nAS.
     return D, Dstar, S_star.I, AS_noblur, nAS, S_disk
 end
