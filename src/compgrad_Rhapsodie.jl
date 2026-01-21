@@ -6,6 +6,7 @@ using EasyFITS
 using InterpolationKernels
 using HDF5
 using LinearAlgebra
+using FFTW
 
 export 
     comp_grad, comp_grad2, 
@@ -23,7 +24,123 @@ export
     apply_direct_model, 
     apply_direct_model_transpose,
     apply_direct_model_inverse,
-    get_polar_params
+    get_polar_params,
+    apply_special_inverse_covariance,
+    apply_special_transform_inverse_covariance,
+    toeplitz_convolve
+
+
+function toeplitz_convolve(img::AbstractMatrix{T}, padded_kernel::AbstractMatrix{K}) where {T<:AbstractFloat, K}
+    H, W = size(img)
+    Ph, Pw = size(padded_kernel)
+    if Ph != 2H || Pw != 2W
+        throw(ArgumentError("padded_kernel must have size (2H,2W) for image size (H,W). Got $(Ph)x$(Pw) vs expected $(2H)x$(2W)."))
+    end
+
+    # pad image to (2H,2W)
+    P = similar(padded_kernel, Complex{promote_type(T,Float64)})
+    P .= 0
+    # place real image in top-left corner
+    P[1:H, 1:W] .= complex.(img)
+
+    # FFT, multiply, IFFT
+    result_padded = ifft(fft(P) .* padded_kernel)
+    # keep real part and crop
+    return real(result_padded[1:H, 1:W])
+end
+
+
+function apply_special_inverse_covariance( input_array::AbstractArray{T,3}, kernel, σ2::T ) where {T<:AbstractFloat}
+    H, W2, C = size(input_array)
+    if W2 % 2 != 0
+        throw(ArgumentError("second dimension must be even (2W). Got $W2"))
+    end
+    W = div(W2, 2)
+
+    # output: same layout (H, 2W, C)
+    out = Array{Float64}(undef, H, W2, C)
+
+    for c in 1:C
+        # views avoid copies; we materialize only when needed
+        x_view = @view input_array[:, 1:W, c]        # (H, W)
+        y_view = @view input_array[:, W+1:2W, c]     # (H, W)
+
+        # convert to Float64 matrices for FFT stability
+        x = Array{Float64}(x_view)
+        y = Array{Float64}(y_view)
+
+        sum_xy = x .+ y
+
+        # F† Δ F (x + y)
+        conv = toeplitz_convolve(sum_xy, kernel)   # (H, W)
+
+        # apply formula
+        left  = ((4.0 * σ2) .* x .- conv) ./ (4.0 * σ2^2)
+        right = ((4.0 * σ2) .* y .- conv) ./ (4.0 * σ2^2)
+
+        # write back
+        out[:, 1:W, c]     .= left
+        out[:, W+1:2W, c]  .= right
+    end
+
+    return out
+end
+
+
+"""
+    apply_special_transform_inverse_covariance(input_array, kernel, σ2, R)
+
+DirectModel `R` containing the list of geometric transformations (Hᵥ and H_w for each frame).
+
+Implements the formula:
+C⁻¹[x; y] = (1 / 4σ⁴) * [ 4σ²x - Hᵥ F†ΔF(Hᵥ†x + H_w†y) ; 4σ²y - H_w F†ΔF(Hᵥ†x + H_w†y) ]
+"""
+function apply_special_transform_inverse_covariance( input_array::AbstractArray{T,3}, kernel::AbstractMatrix, σ2::T, R::DirectModel{T} ) where {T<:AbstractFloat}
+    H, W2, C = size(input_array)
+    if W2 % 2 != 0
+        throw(ArgumentError("The second dimension must be even (2W). Received: $W2"))
+    end
+    if C != length(R.TR)
+        throw(ArgumentError(
+            "The number of image channels ($C) must match the number of transformations in R ($(length(R.TR)))."
+        ))
+    end
+    W = div(W2, 2)
+
+    out = Array{Float64}(undef, H, W2, C)
+
+    for c in 1:C
+        # Extract the x and y halves for the current channel
+        x = Array{Float64}(@view input_array[:, 1:W, c])
+        y = Array{Float64}(@view input_array[:, W+1:2W, c])
+
+        # Extract the H_v and H_w operators for THIS SPECIFIC CHANNEL
+        # H_v is R.TR[c].H_l and H_w is R.TR[c].H_r
+        H_v = R.TR[c].H_l
+        H_w = R.TR[c].H_r
+
+        # 1. Compute the inner term: (Hᵥ†x + H_w†y)
+        sum_term = (H_v' * x) .+ (H_w' * y)
+
+        # 2. Apply the convolution: F†ΔF(...)
+        conv = toeplitz_convolve(sum_term, kernel)
+
+        # 3. Apply the forward operators: Hᵥ(...) and H_w(...)
+        left_term  = H_v * conv
+        right_term = H_w * conv
+
+        # 4. Apply the final formula
+        left  = (4.0 * σ2 .* x .- left_term)  ./ (4.0 * σ2^2)
+        right = (4.0 * σ2 .* y .- right_term) ./ (4.0 * σ2^2)
+
+        # 5. Store the results
+        out[:, 1:W, c]     .= left
+        out[:, W+1:2W, c]  .= right
+    end
+
+    return out
+end
+
 
 function get_polar_params()
     data_params=DatasetParameters((128,256), 4, 1, 1, (64.,64.))
@@ -67,7 +184,7 @@ function string_to_noise_model(noise_model_str::String, size::Int = 128, star_ma
 end
 
 function init_rhapsodie_leakage(;alpha = 1e-2, write_files=false, data_folder = "default", noise_model_str::String = "diagonal", corr_amplitude::Float64 = 0.0, corr_filter_size::Float64 = 1.5,
-    reg_param_relative::Float64 = 1e-3, verbose::Bool = true, is_zero_star::Bool = false, is_zero_disk::Bool = false)
+    reg_param_relative::Float64 = 1e-3, verbose::Bool = true, is_zero_star::Bool = false, is_zero_disk::Bool = false, pcent_dead_pixel::Float64 = 0.0)
     
     (data_folder ==  "default") && (data_folder = replace(pathof(compgrad_Rhapsodie), "src/compgrad_Rhapsodie.jl" => "data"))
     path_disk = data_folder*"/sample_for_rhapsodie_128x128.h5"
@@ -116,7 +233,9 @@ function init_rhapsodie_leakage(;alpha = 1e-2, write_files=false, data_folder = 
     field_params=FieldTransformParameters[]
     for i=1:data_params.frames_total
         # push!(field_params, FieldTransformParameters(ker, 0., (0.,0.), (-10.7365 , 1.39344), polar_params[i][1], polar_params[i][2]))
+        # push!(field_params, FieldTransformParameters(ker, 0., (20.,0.), (-20., 0.), polar_params[i][1], polar_params[i][2]))
         push!(field_params, FieldTransformParameters(ker, 0., (0.,0.), (0.,0.), polar_params[i][1], polar_params[i][2]))
+        # push!(field_params, FieldTransformParameters(ker, 0., (0.,0.), (0.,0.), polar_params[i][1], polar_params[i][2]))
     end
     field_transforms = load_field_transforms(object_params, data_params, field_params)
    
@@ -131,7 +250,7 @@ function init_rhapsodie_leakage(;alpha = 1e-2, write_files=false, data_folder = 
     H_noblur = DirectModel(size(S_disk), (128,256,4), S_disk.parameter_type, field_transforms)
 
     # --- 3. Simulation des données observées ---
-    BadPixMap = Float64.(rand(0.0:1e-16:1.0, data_params.size) .< 10.9); #TODO modif
+    BadPixMap = Float64.(rand(0.0:1e-16:1.0, data_params.size) .> pcent_dead_pixel); #TODO modif
     # data, weight = data_simulator_dual_component_bis(BadPixMap, field_transforms, S_disk, S_star; A_disk=blur);
     data, weights_operator = data_simulator_dual_component_bis(BadPixMap, field_transforms, S_disk, S_star; A_disk=blur, noise_model=noise_model, reg_param_relative=reg_param_relative);
     
