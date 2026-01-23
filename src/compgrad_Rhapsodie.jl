@@ -252,11 +252,16 @@ function init_rhapsodie_leakage(;alpha = 1e-2, write_files=false, data_folder = 
     # --- 3. Simulation des données observées ---
     BadPixMap = Float64.(rand(0.0:1e-16:1.0, data_params.size) .> pcent_dead_pixel); #TODO modif
     # data, weight = data_simulator_dual_component_bis(BadPixMap, field_transforms, S_disk, S_star; A_disk=blur);
-    data, weights_operator = data_simulator_dual_component_bis(BadPixMap, field_transforms, S_disk, S_star; A_disk=blur, noise_model=noise_model, reg_param_relative=reg_param_relative);
+    data, weights = data_simulator_dual_component_bis(BadPixMap, field_transforms, S_disk, S_star; A_disk=blur, noise_model=noise_model);
     
+    # Update weights only for diagonal or diagonal+correlated noise models
+    if isa(noise_model, DiagonalNoise) || isa(noise_model, DiagonalAndCorrelatedNoise)
+        noise_model = with_weights(noise_model, weights)
+    end
+
     # Le Dataset contient le modèle COMPLET H (A)
-    D = Dataset(data, weights_operator, H)
-    Dstar = Dataset(data, weights_operator, H_noblur)
+    D = Dataset(data, noise_model, H)
+    Dstar = Dataset(data, noise_model, H_noblur)
 
     # --- 4. Pré-calcul des termes liés à l'étoile (s) ---
 
@@ -270,11 +275,10 @@ function init_rhapsodie_leakage(;alpha = 1e-2, write_files=false, data_folder = 
     # S_star_3 = zeros(128,128,3)
     # S_star_3[:,:,1] = S_star_I
 
-
     # Norme : ||A'*s||^2_W
     # Note: On utilise ici la réponse de l'étoile NON pondérée par lambda.
     # Si votre nAS doit inclure lambda, changez `AS_noblur` en `leakage_term` ci-dessous.
-    nAS = sum(D.weights_op * abs2.(AS_noblur))
+    nAS = !isnothing(weights) ? sum(weights .* abs2.(AS_noblur)) : nothing
 
     # --- 5. Sauvegarde optionnelle et retour ---
     if write_files == true
