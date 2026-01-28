@@ -8,25 +8,23 @@ using HDF5
 using LinearAlgebra
 using FFTW
 
-export 
-    comp_grad, comp_grad2, 
-    init_rhapsodie, generate_star, 
-    init_rhapsodie2, 
-    comp_residual, 
-    comp_grad_x, 
-    comp_grad_f, 
-    comp_joint_evaluation, 
-    init_rhapsodie_leakage, 
-    comp_grad_speckle_scalar_leakage, 
-    comp_grad_disk_scalar_leakage, 
-    PolarimetricMap, 
+export
+    comp_grad, comp_grad2,
+    init_rhapsodie, generate_star,
+    init_rhapsodie2,
+    comp_residual,
+    comp_grad_x,
+    comp_grad_f,
+    comp_joint_evaluation,
+    init_rhapsodie_leakage,
+    comp_grad_speckle_scalar_leakage,
+    comp_grad_disk_scalar_leakage,
+    PolarimetricMap,
     string_to_noise_model,
-    apply_direct_model, 
+    apply_direct_model,
     apply_direct_model_transpose,
     apply_direct_model_inverse,
     get_polar_params,
-    apply_special_inverse_covariance,
-    apply_special_transform_inverse_covariance,
     toeplitz_convolve
 
 
@@ -47,98 +45,6 @@ function toeplitz_convolve(img::AbstractMatrix{T}, padded_kernel::AbstractMatrix
     result_padded = ifft(fft(P) .* padded_kernel)
     # keep real part and crop
     return real(result_padded[1:H, 1:W])
-end
-
-
-function apply_special_inverse_covariance( input_array::AbstractArray{T,3}, kernel, σ2::T ) where {T<:AbstractFloat}
-    H, W2, C = size(input_array)
-    if W2 % 2 != 0
-        throw(ArgumentError("second dimension must be even (2W). Got $W2"))
-    end
-    W = div(W2, 2)
-
-    # output: same layout (H, 2W, C)
-    out = Array{Float64}(undef, H, W2, C)
-
-    for c in 1:C
-        # views avoid copies; we materialize only when needed
-        x_view = @view input_array[:, 1:W, c]        # (H, W)
-        y_view = @view input_array[:, W+1:2W, c]     # (H, W)
-
-        # convert to Float64 matrices for FFT stability
-        x = Array{Float64}(x_view)
-        y = Array{Float64}(y_view)
-
-        sum_xy = x .+ y
-
-        # F† Δ F (x + y)
-        conv = toeplitz_convolve(sum_xy, kernel)   # (H, W)
-
-        # apply formula
-        left  = ((4.0 * σ2) .* x .- conv) ./ (4.0 * σ2^2)
-        right = ((4.0 * σ2) .* y .- conv) ./ (4.0 * σ2^2)
-
-        # write back
-        out[:, 1:W, c]     .= left
-        out[:, W+1:2W, c]  .= right
-    end
-
-    return out
-end
-
-
-"""
-    apply_special_transform_inverse_covariance(input_array, kernel, σ2, R)
-
-DirectModel `R` containing the list of geometric transformations (Hᵥ and H_w for each frame).
-
-Implements the formula:
-C⁻¹[x; y] = (1 / 4σ⁴) * [ 4σ²x - Hᵥ F†ΔF(Hᵥ†x + H_w†y) ; 4σ²y - H_w F†ΔF(Hᵥ†x + H_w†y) ]
-"""
-function apply_special_transform_inverse_covariance( input_array::AbstractArray{T,3}, kernel::AbstractMatrix, σ2::T, R::DirectModel{T} ) where {T<:AbstractFloat}
-    H, W2, C = size(input_array)
-    if W2 % 2 != 0
-        throw(ArgumentError("The second dimension must be even (2W). Received: $W2"))
-    end
-    if C != length(R.TR)
-        throw(ArgumentError(
-            "The number of image channels ($C) must match the number of transformations in R ($(length(R.TR)))."
-        ))
-    end
-    W = div(W2, 2)
-
-    out = Array{Float64}(undef, H, W2, C)
-
-    for c in 1:C
-        # Extract the x and y halves for the current channel
-        x = Array{Float64}(@view input_array[:, 1:W, c])
-        y = Array{Float64}(@view input_array[:, W+1:2W, c])
-
-        # Extract the H_v and H_w operators for THIS SPECIFIC CHANNEL
-        # H_v is R.TR[c].H_l and H_w is R.TR[c].H_r
-        H_v = R.TR[c].H_l
-        H_w = R.TR[c].H_r
-
-        # 1. Compute the inner term: (Hᵥ†x + H_w†y)
-        sum_term = (H_v' * x) .+ (H_w' * y)
-
-        # 2. Apply the convolution: F†ΔF(...)
-        conv = toeplitz_convolve(sum_term, kernel)
-
-        # 3. Apply the forward operators: Hᵥ(...) and H_w(...)
-        left_term  = H_v * conv
-        right_term = H_w * conv
-
-        # 4. Apply the final formula
-        left  = (4.0 * σ2 .* x .- left_term)  ./ (4.0 * σ2^2)
-        right = (4.0 * σ2 .* y .- right_term) ./ (4.0 * σ2^2)
-
-        # 5. Store the results
-        out[:, 1:W, c]     .= left
-        out[:, W+1:2W, c]  .= right
-    end
-
-    return out
 end
 
 
@@ -182,6 +88,8 @@ function string_to_noise_model(noise_model_str::String, size::Int = 128, star_ma
     
     return model
 end
+
+
 
 function init_rhapsodie_leakage(;alpha = 1e-2, write_files=false, data_folder = "default", noise_model_str::String = "diagonal", corr_amplitude::Float64 = 0.0, corr_filter_size::Float64 = 1.5,
     reg_param_relative::Float64 = 1e-3, verbose::Bool = true, is_zero_star::Bool = false, is_zero_disk::Bool = false, pcent_dead_pixel::Float64 = 0.0)
@@ -486,6 +394,40 @@ function comp_grad(x::AbstractArray{T,3}, D) where {T<:AbstractFloat}
     ga = transform_polarimetric_to_array(g, S, x)
 
     return ga, chi2
+end
+
+function comp_grad(x::AbstractArray{T,3}, dataset_disk::Dataset{T}, dataset_speckle::Dataset{T}, dm_on_speckle_mean::AbstractArray{T,3};
+    additive_variance::Union{Nothing, T} = nothing,
+    rtol::Real = 1e-5,
+    maxiter::Int = 200,
+    verbose::Bool = false) where {T<:AbstractFloat}
+
+    # Convert x to PolarimetricMap (handles both Julia and Python array conventions)
+    S = PolarimetricMap("intensities", x[1, :, :] - x[2, :, :], x[2, :, :], x[3, :, :])
+    g = copy(S)
+
+    # residual = Ax + a*Bs - y (dm_on_speckle_mean = alpha_star * leakage_term)
+    residual = dataset_disk.direct_model * S + dm_on_speckle_mean - dataset_disk.data
+
+    # (C + λI)^{-1} * residual
+    weighted_residual, info = RhapsodieDirect.apply_precision(
+        residual,
+        dataset_speckle,
+        rtol=rtol,
+        additive_variance=additive_variance,
+        maxiter=maxiter,
+        verbose=verbose
+    )
+
+    # A^T * weighted_residual
+    apply!(g, dataset_disk.direct_model', weighted_residual)
+
+    # chi2 = residual^T * W * residual
+    chi2 = dot(residual, weighted_residual)
+
+    ga = transform_polarimetric_to_array(g, S, x)
+
+    return ga, chi2, info
 end
 
 function comp_grad_disk_scalar_leakage(x::AbstractArray{T,3}, alpha_s::T, leakage::AbstractArray{T,3}, D; gamma::T = zero(T)) where {T<:AbstractFloat}  
@@ -851,15 +793,27 @@ function generate_star(parameters::ObjectParameters, alpha=1.0)
 end
 
 function transform_polarimetric_to_array(g::PolarimetricMap{T}, S::PolarimetricMap{T}, x::AbstractArray{T,3}) where {T<:AbstractFloat}
-    # Création d'une copie du tableau d'entrée
-    ga = copy(x)
-    
-    # Assignation des composantes transformées
-    ga[:, :, 1] = g.I
-    ga[:, :, 2] = cos.(2*S.θ).*g.Q + sin.(2*S.θ).*g.U
-    # ga[:, :, 3] = 2*S.Ip.*(-sin.(2*S.θ).*g.Q + cos.(2*S.θ).*g.U)  # Pour l'angle de polarisation
-    ga[:, :, 3] = fill!(ga[:, :, 3], 0.0)  # Remplit le 3ème canal avec des zéros
-    
+    # Compute gradient components
+    grad_Iu = g.I
+    grad_Ip = cos.(2*S.θ) .* g.Q + sin.(2*S.θ) .* g.U
+    grad_theta = zeros(T, size(g.I))  # Zero for theta gradient
+
+    if size(x, 3) == 3
+        # Format Julia: (H, W, 3) - channels last
+        ga = similar(x)
+        ga[:, :, 1] = grad_Iu
+        ga[:, :, 2] = grad_Ip
+        ga[:, :, 3] = grad_theta
+    elseif size(x, 1) == 3
+        # Format Python: (3, H, W) - channels first
+        ga = similar(x)
+        ga[1, :, :] = grad_Iu
+        ga[2, :, :] = grad_Ip
+        ga[3, :, :] = grad_theta
+    else
+        error("x must be (H, W, 3) or (3, H, W), got: $(size(x))")
+    end
+
     return ga
 end
 

@@ -1491,7 +1491,7 @@ weakdeps = ["Distributed"]
     DistributedExt = "Distributed"
 
 [[deps.RhapsodieDirect]]
-deps = ["EasyFITS", "FFTW", "InterpolationKernels", "LazyAlgebra", "LinearInterpolators", "Plots", "TwoDimensional"]
+deps = ["EasyFITS", "FFTW", "InterpolationKernels", "LazyAlgebra", "LinearAlgebra", "LinearInterpolators", "Plots", "TwoDimensional"]
 path = "/home/qvillegas/WORK/Fork/RhapsodieDirect"
 uuid = "0ed9b2bd-c76c-4f1a-94cb-965bde98f638"
 version = "0.1.0"
