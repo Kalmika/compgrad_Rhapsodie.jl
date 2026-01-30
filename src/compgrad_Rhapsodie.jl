@@ -10,6 +10,8 @@ using FFTW
 
 export
     comp_grad, comp_grad2,
+    comp_grad_fast!,
+    setup_precision_workspace,
     init_rhapsodie, generate_star,
     init_rhapsodie2,
     comp_residual,
@@ -428,6 +430,141 @@ function comp_grad(x::AbstractArray{T,3}, dataset_disk::Dataset{T}, dataset_spec
     ga = transform_polarimetric_to_array(g, S, x)
 
     return ga, chi2, info
+end
+
+"""
+    setup_precision_workspace(dataset_speckle::Dataset{T}, data_shape; additive_variance::T=zero(T)) where {T}
+
+Create a pre-allocated workspace for the precision solver (PCG).
+Call this once at the beginning of optimization to avoid allocations in the loop.
+
+# Arguments
+- `dataset_speckle`: Dataset containing the noise model
+- `data_shape`: Shape of the data (e.g., `size(dataset_disk.data)`)
+
+# Keyword Arguments
+- `additive_variance`: Additive variance parameter for regularization (default: `0.0`)
+
+# Returns
+- `PrecisionWorkspace`: Pre-allocated workspace for `apply_precision_fast!`
+"""
+function setup_precision_workspace(dataset_speckle::Dataset{T}, data_shape; additive_variance::T=zero(T)) where {T}
+    return RhapsodieDirect.create_precision_workspace(dataset_speckle.noise_model, data_shape, additive_variance)
+end
+
+"""
+    transform_polarimetric_to_array!(ga, g::PolarimetricMap{T}, S::PolarimetricMap{T}, x) where {T}
+
+In-place version of `transform_polarimetric_to_array`. Modifies `ga` directly.
+
+# Arguments
+- `ga`: Pre-allocated output array (same shape as `x`)
+- `g`: Gradient as PolarimetricMap
+- `S`: Current state as PolarimetricMap
+- `x`: Input array (used to determine format: Julia or Python)
+"""
+function transform_polarimetric_to_array!(ga::AbstractArray{T,3}, g::PolarimetricMap{T}, S::PolarimetricMap{T}, x::AbstractArray{T,3}) where {T<:AbstractFloat}
+    # Compute gradient components
+    grad_Iu = g.I
+    grad_Ip = cos.(2*S.θ) .* g.Q + sin.(2*S.θ) .* g.U
+
+    if size(x, 3) == 3
+        # Format Julia: (H, W, 3) - channels last
+        ga[:, :, 1] .= grad_Iu
+        ga[:, :, 2] .= grad_Ip
+        ga[:, :, 3] .= zero(T)
+    elseif size(x, 1) == 3
+        # Format Python: (3, H, W) - channels first
+        ga[1, :, :] .= grad_Iu
+        ga[2, :, :] .= grad_Ip
+        ga[3, :, :] .= zero(T)
+    else
+        error("x must be (H, W, 3) or (3, H, W), got: $(size(x))")
+    end
+
+    return ga
+end
+
+"""
+    comp_grad_fast!(ga, x, dataset_disk, dataset_speckle, dm_on_speckle_mean, workspace; kwargs...)
+
+Zero-allocation version of `comp_grad` using pre-allocated workspace.
+The gradient output buffer must be pre-allocated before calling.
+
+# Arguments
+- `ga`: Pre-allocated gradient output array (same shape as `x`)
+- `x`: Disk parameters (Iu, Ip, θ) - shape (3, H, W) for Python or (H, W, 3) for Julia
+- `dataset_disk`: Dataset with disk direct model
+- `dataset_speckle`: Dataset with speckle noise model
+- `dm_on_speckle_mean`: Pre-computed `alpha_star * leakage_term`
+- `workspace`: Pre-allocated `PrecisionWorkspace` from `setup_precision_workspace` (includes weighted_residual buffer)
+
+# Keyword Arguments
+- `additive_variance`: Additive variance for regularization (default: `nothing`)
+- `rtol`: Relative tolerance for PCG solver (default: `1e-5`)
+- `maxiter`: Maximum iterations for PCG solver (default: `200`)
+- `verbose`: Print convergence info (default: `false`)
+
+# Returns
+- `chi2`: Chi-square value
+- `info`: Convergence info from PCG solver
+
+# Example
+julia :
+    # Setup (once, before optimization loop)
+    ws = setup_precision_workspace(dataset_speckle, size(dataset_disk.data))
+    ga = zeros(size(x))
+
+    # In optimization loop (zero allocations)
+    chi2, info = comp_grad_fast!(ga, x, dataset_disk, dataset_speckle, dm_on_speckle_mean, ws)
+
+"""
+function comp_grad_fast!(
+    ga::AbstractArray{T,3},
+    x::AbstractArray{T,3},
+    dataset_disk::Dataset{T},
+    dataset_speckle::Dataset{T},
+    dm_on_speckle_mean::AbstractArray{T,3},
+    workspace;
+    additive_variance::Union{Nothing, T} = nothing,
+    rtol::Real = 1e-5,
+    maxiter::Int = 200,
+    verbose::Bool = false
+) where {T<:AbstractFloat}
+
+    # Convert x to PolarimetricMap (handles both Julia and Python array conventions)
+    S = PolarimetricMap("intensities", x[1, :, :] - x[2, :, :], x[2, :, :], x[3, :, :])
+    g = copy(S)
+
+    # residual = Ax + a*Bs - y (dm_on_speckle_mean = alpha_star * leakage_term)
+    residual = dataset_disk.direct_model * S + dm_on_speckle_mean - dataset_disk.data
+
+    # (C + λI)^{-1} * residual using pre-allocated workspace
+    # Result is stored in workspace.weighted_residual
+    info = RhapsodieDirect.apply_precision_fast!(
+        dataset_speckle.noise_model,
+        residual,
+        dataset_speckle.direct_model,
+        workspace;
+        additive_variance=additive_variance,
+        rtol=rtol,
+        maxiter=maxiter,
+        verbose=verbose
+    )
+
+    # Get weighted_residual from workspace
+    weighted_residual = workspace.weighted_residual
+
+    # A^T * weighted_residual
+    apply!(g, dataset_disk.direct_model', weighted_residual)
+
+    # chi2 = residual^T * W * residual
+    chi2 = dot(residual, weighted_residual)
+
+    # Transform gradient in-place
+    transform_polarimetric_to_array!(ga, g, S, x)
+
+    return chi2, info
 end
 
 function comp_grad_disk_scalar_leakage(x::AbstractArray{T,3}, alpha_s::T, leakage::AbstractArray{T,3}, D; gamma::T = zero(T)) where {T<:AbstractFloat}  
