@@ -529,7 +529,8 @@ function comp_grad_fast!(
     additive_variance::Union{Nothing, T} = nothing,
     rtol::Real = 1e-5,
     maxiter::Int = 200,
-    verbose::Bool = false
+    verbose::Bool = false,
+    error_on_non_convergence::Bool = false
 ) where {T<:AbstractFloat}
 
     # Convert x to PolarimetricMap (handles both Julia and Python array conventions)
@@ -549,7 +550,8 @@ function comp_grad_fast!(
         additive_variance=additive_variance,
         rtol=rtol,
         maxiter=maxiter,
-        verbose=verbose
+        verbose=verbose,
+        error_on_non_convergence=error_on_non_convergence
     )
 
     # Get weighted_residual from workspace
