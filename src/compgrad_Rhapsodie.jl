@@ -27,8 +27,11 @@ export
     apply_direct_model_transpose,
     apply_direct_model_inverse,
     get_polar_params,
-    toeplitz_convolve
+    toeplitz_convolve,
+    SphereMetadata, read_sphere_parameters,
+    read_matrix_file, expand_ndit, read_crosstalk_coefficients
 
+include("SPHERE_IO.jl")
 
 function toeplitz_convolve(img::AbstractMatrix{T}, padded_kernel::AbstractMatrix{K}) where {T<:AbstractFloat, K}
     H, W = size(img)
@@ -143,8 +146,8 @@ function init_rhapsodie_leakage(;alpha = 1e-2, write_files=false, data_folder = 
     field_params=FieldTransformParameters[]
     for i=1:data_params.frames_total
         # push!(field_params, FieldTransformParameters(ker, 0., (0.,0.), (-10.7365 , 1.39344), polar_params[i][1], polar_params[i][2]))
-        # push!(field_params, FieldTransformParameters(ker, 0., (20.,0.), (-20., 0.), polar_params[i][1], polar_params[i][2]))
-        push!(field_params, FieldTransformParameters(ker, 0., (0.,0.), (0.,0.), polar_params[i][1], polar_params[i][2]))
+        push!(field_params, FieldTransformParameters(ker, 0., (20.,0.), (-20., 0.), polar_params[i][1], polar_params[i][2]))
+        # push!(field_params, FieldTransformParameters(ker, 0., (0.,0.), (0.,0.), polar_params[i][1], polar_params[i][2]))
         # push!(field_params, FieldTransformParameters(ker, 0., (0.,0.), (0.,0.), polar_params[i][1], polar_params[i][2]))
     end
     field_transforms = load_field_transforms(object_params, data_params, field_params)
