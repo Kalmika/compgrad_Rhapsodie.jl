@@ -19,6 +19,7 @@ export
     comp_grad_f,
     comp_joint_evaluation,
     init_rhapsodie_leakage,
+    init_sphere_leakage,
     comp_grad_speckle_scalar_leakage,
     comp_grad_disk_scalar_leakage,
     PolarimetricMap,
@@ -146,8 +147,8 @@ function init_rhapsodie_leakage(;alpha = 1e-2, write_files=false, data_folder = 
     field_params=FieldTransformParameters[]
     for i=1:data_params.frames_total
         # push!(field_params, FieldTransformParameters(ker, 0., (0.,0.), (-10.7365 , 1.39344), polar_params[i][1], polar_params[i][2]))
-        push!(field_params, FieldTransformParameters(ker, 0., (20.,0.), (-20., 0.), polar_params[i][1], polar_params[i][2]))
-        # push!(field_params, FieldTransformParameters(ker, 0., (0.,0.), (0.,0.), polar_params[i][1], polar_params[i][2]))
+        # push!(field_params, FieldTransformParameters(ker, 0., (20.,0.), (-20., 0.), polar_params[i][1], polar_params[i][2]))
+        push!(field_params, FieldTransformParameters(ker, 0., (0.,0.), (0.,0.), polar_params[i][1], polar_params[i][2]))
         # push!(field_params, FieldTransformParameters(ker, 0., (0.,0.), (0.,0.), polar_params[i][1], polar_params[i][2]))
     end
     field_transforms = load_field_transforms(object_params, data_params, field_params)
@@ -200,6 +201,110 @@ function init_rhapsodie_leakage(;alpha = 1e-2, write_files=false, data_folder = 
     
     # On retourne D (avec H), l'intensité de l'étoile, le terme de fuite et nAS.
     return D, Dstar, S_star.I, AS_noblur, nAS, S_disk
+end
+
+function init_sphere_leakage(data_folder::String;
+    psf_type::String = "parametered",
+    psf_star_type::String = "estimated",
+    noise_model_str::String = "diagonal",
+    corr_amplitude::Float64 = 0.0,
+    corr_filter_size::Float64 = 1.5,
+    verbose::Bool = true
+)
+    # --- 1. Métadonnées SPHERE ---
+    verbose && println("Reading SPHERE metadata from: ", data_folder * "/Parameters.txt")
+    meta = read_sphere_parameters(data_folder * "/Parameters.txt")
+    verbose && println("  dim_y=$(meta.dim_y), n_frames=$(meta.n_frames), ndit=$(meta.ndit), n_angles=$(meta.n_angles)")
+    verbose && println("  center=$(meta.center)")
+
+    object_size = (meta.dim_y, meta.dim_y)
+    data_size   = (meta.dim_y, 2 * meta.dim_y)
+    n_frames    = meta.n_frames
+    ndit        = meta.ndit
+
+    # --- 2. Paramètres objet / données ---
+    object_params = ObjectParameters(object_size, meta.center)
+    data_params   = DatasetParameters(data_size, n_frames, ndit, meta.n_angles, meta.center)
+
+    # --- 3. Données et poids réels ---
+    verbose && println("Loading data and weights from FITS...")
+    data    = permutedims(readfits(data_folder * "/DATA_processed_coro.fits"),   (2, 1, 3))
+    weights = permutedims(readfits(data_folder * "/WEIGHT_processed_coro.fits"), (2, 1, 3))
+    verbose && println("  data: ", size(data), "  weights: ", size(weights))
+
+    # --- 4. Coefficients polarimétriques réels (avec cross-talk) ---
+    verbose && println("Reading crosstalk coefficients...")
+    coeffs_matrix, _, _ = read_crosstalk_coefficients(
+        data_folder * "/instruments_values_with_crosstalk.txt"; ndit=ndit)
+    # coeffs_matrix: (n_frames × 6) = [I₁, Q₁, U₁, I₂, Q₂, U₂]
+
+    # --- 5. Dithering ---
+    dithering = readdlm(data_folder * "/Ditering.txt")
+    n_dither  = size(dithering, 1)
+    dither_for(i) = n_dither == 1 ?
+        (Float64(dithering[1, 2]), Float64(dithering[1, 1])) :
+        (Float64(dithering[i, 2]), Float64(dithering[i, 1]))
+
+    # --- 6. PSF : flou (instrument) et étoile (terme de fuite) ---
+    psf_file_suffix = psf_type == "parametered" ? "" : "_$(psf_type)"
+    path_psf         = data_folder * "/PSF_parametered$(psf_file_suffix).fits"
+    path_psf_centers = data_folder * "/PSF_centers$(psf_file_suffix).txt"
+    path_star_psf    = data_folder * "/PSF_$(psf_star_type).fits"
+    verbose && println("PSF (blur): ", path_psf)
+    verbose && println("PSF (star): ", path_star_psf)
+
+    psf_center = readdlm(path_psf_centers)
+    psf        = readfits(path_psf)
+    # PSF files may stack two camera kernels vertically — take first half if taller than wide
+    psf_kernel = size(psf, 1) > size(psf, 2) ? (psf[1:end÷2, :]') : (psf')
+    blur       = set_fft_operator(object_params, psf_kernel, psf_center[1:2])[1]
+
+    # --- 7. Field transforms (rotation ADI + dithering + cross-talk) ---
+    ker          = CatmullRomSpline(Float64, Flat)
+    field_params = FieldTransformParameters[]
+    for i in 1:n_frames
+        dy, dx = dither_for(i)
+        push!(field_params, FieldTransformParameters(
+            ker,
+            meta.rot_angles[i],                                               # angle parallactique (ADI)
+            (dy, dx),                                                          # décalage spatial (dithering)
+            (0., 0.),
+            (coeffs_matrix[i,1], coeffs_matrix[i,2], coeffs_matrix[i,3]),    # (I, Q, U) caméra gauche
+            (coeffs_matrix[i,4], coeffs_matrix[i,5], coeffs_matrix[i,6])))   # (I, Q, U) caméra droite
+    end
+    field_transforms = load_field_transforms(object_params, data_params, field_params)
+
+    # --- 8. Modèles directs ---
+    H        = DirectModel(object_size, (data_size..., n_frames), "intensities", field_transforms, blur)
+    H_noblur = DirectModel(object_size, (data_size..., n_frames), "intensities", field_transforms)
+
+    # --- 9. Modèle de bruit (poids pré-calculés depuis WEIGHT_processed_coro.fits) ---
+    verbose && println("-> noise_model_str: ", noise_model_str)
+    noise_model = string_to_noise_model(noise_model_str, meta.dim_y, 1.0, corr_amplitude, corr_filter_size, verbose)
+    if isa(noise_model, DiagonalNoise) || isa(noise_model, DiagonalAndCorrelatedNoise)
+        noise_model = with_weights(noise_model, weights)
+    end
+
+    # --- 10. Datasets ---
+    D     = Dataset(data, noise_model, H)
+    Dstar = Dataset(data, noise_model, H_noblur)
+
+    # --- 11. Terme de fuite — PSF étoile centrée dans le plan objet ---
+    raw_star = readfits(path_star_psf)
+    star_I   = ndims(raw_star) == 3 ? raw_star[:, :, 1] : raw_star
+    if size(star_I) != object_size
+        padded = zeros(Float64, object_size...)
+        h_psf, w_psf = size(star_I)
+        r0 = div(object_size[1] - h_psf, 2) + 1
+        c0 = div(object_size[2] - w_psf, 2) + 1
+        padded[r0:r0+h_psf-1, c0:c0+w_psf-1] = star_I
+        star_I = padded
+    end
+    S_star    = PolarimetricMap("intensities", star_I, zero(star_I), zero(star_I))
+    AS_noblur = H_noblur * S_star
+    nAS       = sum(weights .* abs2.(AS_noblur))
+
+    return D, Dstar, S_star.I, AS_noblur, nAS
 end
 
 # init_rhapsodie : L'étoile (STAR) est ajoutée directement au disque. L'intensité de l'étoile est contrôlée par un simple facteur d'échelle alpha. C'est une composition physique simple.
@@ -284,7 +389,7 @@ function init_rhapsodie2(;alpha = 1e-2, write_files=false, data_folder = "defaul
     AS_noblur = H_noblur * STAR_p
     
     # Calcul de la norme pondérée ||A*S||^2_W
-    nAS = sum(D.weights_op .* abs2.(AS_noblur))
+    nAS = sum(D.noise_model.weights .*abs2.(AS_noblur))
     # --- MODIFICATION END ---
 
 
@@ -383,7 +488,7 @@ function init_rhapsodie(;alpha = 1.0, write_files=false, path_disk = "default")
     
     # DataSet for gradient computation
     D = Dataset(data, weight , H)
-    nAS = sum(D.weights_op .* abs2.(D.direct_model*STAR))
+    nAS = sum(D.noise_model.weights .*abs2.(D.direct_model*STAR))
 
     return D, STAR.I, nAS
 end
@@ -392,7 +497,7 @@ function comp_grad(x::AbstractArray{T,3}, D) where {T<:AbstractFloat}
     S = PolarimetricMap("intensities", x[:, :, 1] - x[:, :, 2], x[:, :, 2], x[:, :, 3])
     g = copy(S)
     res = D.direct_model*S - D.data
-    wres = D.weights_op .* res
+    wres = D.noise_model.weights .*res
     apply!(g, D.direct_model', wres)
     chi2 = dot(res,wres)
 
@@ -597,16 +702,15 @@ function comp_grad_disk_scalar_leakage(x::AbstractArray{T,3}, alpha_s::T, leakag
     residual = Ax .+ alpha_s*leakage .- D.data
     
     # 4. Ajout du terme de régularisation gamma si différent de zéro
-    if gamma != zero(T) # TODO....
-        # residual = residual ./ (1 .+ gamma^2 * D.weights_op)
-        residual_gamma = residual ./ (1 .+ gamma^2 * D.weights_op.weights)
+    if gamma != zero(T)
+        residual = residual ./ (1 .+ gamma^2 .* D.noise_model.weights)
     end
 
     # 5. Appliquer les poids
-    weighted_residual = D.weights_op.weights .* residual_gamma
+    weighted_residual = D.noise_model.weights .* residual
     
     # 6. Calculer le chi-deux
-    chi2 = dot(residual_gamma, weighted_residual)
+    chi2 = dot(residual, weighted_residual)
     
     # 7. Appliquer l'adjoint : A^T * (weighted_residual)
     apply!(g, D.direct_model', weighted_residual)
@@ -646,11 +750,11 @@ function apply_(x::AbstractArray{T,3}, alpha_s::T, leakage::AbstractArray{T,3}, 
     # 4. Ajout du terme de régularisation gamma si différent de zéro
     if gamma != zero(T) # TODO....
         # residual = residual ./ (1 .+ gamma^2 * D.weights_op)
-        residual = residual ./ (1 .+ gamma^2 .* D.weights_op)
+        residual = residual ./ (1 .+ gamma^2 .* D.noise_model.weights)
     end
     
     # 5. Appliquer les poids
-    weighted_residual = D.weights_op * residual
+    weighted_residual = D.noise_model.weights .* residual
     
     # 6. Calculer le chi-deux
     chi2 = dot(residual, weighted_residual)
@@ -689,7 +793,7 @@ function comp_grad_speckle_scalar_leakage(x::AbstractArray{T,3}, D, D2) where {T
     residual = Ax .- D.data
     
     # 5. Appliquer les poids
-    weighted_residual = D.weights_op * residual
+    weighted_residual = D.noise_model.weights .* residual
 
     # 6. Calculer le chi-deux
     chi2 = dot(residual, weighted_residual)
@@ -762,7 +866,7 @@ function comp_grad_scalar_leakage_alpha_star(x::AbstractArray{T,3}, alpha_s::T, 
     # Norme : ||A'*s||^2_W
     # Note: On utilise ici la réponse de l'étoile NON pondérée par lambda.
     # Si votre nAS doit inclure lambda, changez `AS_noblur` en `leakage_term` ci-dessous.
-    nAS = sum(D.weights_op .* abs2.(AS_noblur))
+    nAS = sum(D.noise_model.weights .*abs2.(AS_noblur))
 
     # --- 5. Sauvegarde optionnelle et retour ---
     if write_files == true
@@ -780,7 +884,7 @@ function comp_grad2(x::AbstractArray{T,3}, D) where {T<:AbstractFloat}
     S = PolarimetricMap("intensities", x[:, :, 1] - x[:, :, 2], x[:, :, 2], x[:, :, 3])
     g = copy(S)
     res = D.direct_model*S - D.data
-    wres = D.weights_op .* res
+    wres = D.noise_model.weights .*res
     apply!(g, D.direct_model', wres)
     chi2 = dot(res,wres)
 
@@ -836,7 +940,7 @@ function comp_grad_x(x::AbstractArray{T,3}, f::AbstractArray{T,3}, D) where {T<:
     residual = comp_residual(x, f, D)
     
     # Apply weights
-    weighted_residual = D.weights_op .* residual
+    weighted_residual = D.noise_model.weights .*residual
     
     # Compute chi-square for monitoring
     chi2 = dot(residual, weighted_residual)
@@ -869,7 +973,7 @@ function comp_grad_f(x::AbstractArray{T,3}, f::AbstractArray{T,3}, D) where {T<:
     residual = comp_residual(x, f, D)
     
     # Apply weights - this IS the gradient with respect to f
-    grad_f = D.weights_op .* residual
+    grad_f = D.noise_model.weights .*residual
     
     # Compute chi-square for monitoring
     chi2 = dot(residual, grad_f)
@@ -894,7 +998,7 @@ function comp_joint_evaluation(x::AbstractArray{T,3}, f::AbstractArray{T,3}, D) 
     """
     # Compute residual once using the corrected comp_residual
     residual = comp_residual(x, f, D)
-    weighted_residual = D.weights_op .* residual
+    weighted_residual = D.noise_model.weights .*residual
     chi2 = dot(residual, weighted_residual)
     
     # Gradient with respect to x: A^T * W * residual
