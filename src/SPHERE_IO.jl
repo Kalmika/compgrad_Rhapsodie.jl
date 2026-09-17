@@ -1,46 +1,87 @@
 # src/SPHERE_IO.jl
 
-# Metadata structure matching your specifications
+# Parameters.txt layout (checked against HD109562, AB Aurigae and RY Lup):
+#
+#   line 1                 dim_y
+#   line 2                 n_frames (NTOT)
+#   line 3                 ndit      (frames per HWP position)
+#   line 4                 n_angles
+#   lines 5-6              star centre,             written (x, y) = (column, row)
+#   lines 7 .. 6+n_angles  field rotation angles, in DEGREES, one per frame
+#   lines 7+n, 8+n         right-channel offset,    written (x, y) = (column, row)
+#
+# The last two values are NOT a true-north offset and a plate scale, despite the
+# field names this struct used before: Rhapsodie.jl (test_separable_reconstruction.jl:22)
+# and PADI (PADI_reconstruction.jl:35) both read them as `Epsilon = ([0,0], par[end-1:end])`,
+# the offset of the right IRDIS channel. A plate scale would not vary from 9.65 to
+# 10.75 across three datasets of the same instrument; a channel offset does.
+#
+# Two conversions are applied here, so that SphereMetadata is entirely in Julia
+# array order (dim1, dim2) = (row, column) with angles in radians, which is what
+# every transform downstream expects:
+#
+#   1. centre and epsilon are swapped from the file's (x, y) to (row, column);
+#   2. epsilon is negated, and angles are converted with deg2rad.
+#
+# The epsilon convention was measured on the data rather than inferred, by
+# cross-correlating the two channels of a frame and by taking the centroid of the
+# coronagraphic mask in the weight map:
+#
+#   HD109562   measured right-left offset  (-9.77, +2.22) and (-9.61, +2.40) px
+#              file epsilon                (-2.485, +9.646)
+#   AB Aur     measured right-left offset  (-11.06, +1.10) px
+#              file epsilon                (-1.205, +10.749)
+#
+# so epsilon_right = (-file[end], -file[end-1]). Note that a plain negation without
+# the swap, which is what RhapsodieDirect/examples/generate_data.jl does for the
+# simulated demo file, puts the 10-pixel offset on the wrong axis for these files:
+# the demo Parameters.txt stores epsilon in the opposite component order.
+#
+# The angle SIGN is deliberately not applied here -- see `angle_sign` in
+# init_sphere_leakage.
 struct SphereMetadata
     dim_y::Int
     n_frames::Int
     ndit::Int
     n_angles::Int
-    center::Tuple{Float64, Float64}  # Tuple (x, y)
-    rot_angles::Vector{Float64}      # 1D angle array
-    true_north_offset::Float64
-    plate_scale::Float64
+    center::NTuple{2,Float64}         # (row, column), Julia array order
+    rot_angles::Vector{Float64}       # radians, one per frame, unsigned
+    epsilon_right::NTuple{2,Float64}  # (row, column) offset of the right channel
 end
 
 # Reader function with your default path
 function read_sphere_parameters(filepath::String="/scratch/qvillegas/astro_data/Ab Aurigae/Parameters.txt")
     println("Reading: ", filepath)
 
-    lines = readlines(filepath)
-    # Basic validation
-    if length(lines) < 8
+    # Drop blank lines, including trailing ones, before indexing by line number.
+    lines = filter(!isempty, strip.(readlines(filepath)))
+    if length(lines) < 9
         error("Parameters file seems too short: ", filepath)
     end
 
-    dim_y    = Int(parse(Float64, strip(lines[1])))
-    n_frames = Int(parse(Float64, strip(lines[2])))
-    ndit     = Int(parse(Float64, strip(lines[3])))
-    n_angles = Int(parse(Float64, strip(lines[4])))
+    dim_y    = Int(parse(Float64, lines[1]))
+    n_frames = Int(parse(Float64, lines[2]))
+    ndit     = Int(parse(Float64, lines[3]))
+    n_angles = Int(parse(Float64, lines[4]))
 
-    center_x = parse(Float64, strip(lines[5]))
-    center_y = parse(Float64, strip(lines[6]))
-    center = (center_x, center_y)
-
-    rot_angles = Float64[]
-    for i in 1:n_angles
-        angle = parse(Float64, strip(lines[6 + i]))
-        push!(rot_angles, angle)
+    expected = 6 + n_angles + 2
+    if length(lines) != expected
+        error("Parameters file has $(length(lines)) non-empty lines, expected " *
+              "$expected (= 6 + n_angles + 2) with n_angles=$n_angles: $filepath")
+    end
+    if n_angles != n_frames
+        @warn "n_angles ($n_angles) differs from n_frames ($n_frames): this file does not provide one field angle per frame" filepath
     end
 
-    true_north_offset = parse(Float64, strip(lines[7 + n_angles]))
-    plate_scale       = parse(Float64, strip(lines[8 + n_angles]))
+    # File stores (x, y) = (column, row); swap into Julia array order.
+    center = (parse(Float64, lines[6]), parse(Float64, lines[5]))
 
-    return SphereMetadata(dim_y, n_frames, ndit, n_angles, center, rot_angles, true_north_offset, plate_scale)
+    rot_angles = [deg2rad(parse(Float64, lines[6 + i])) for i in 1:n_angles]
+
+    # Swap into (row, column) and negate: see the comment block above.
+    epsilon_right = (-parse(Float64, lines[end]), -parse(Float64, lines[end-1]))
+
+    return SphereMetadata(dim_y, n_frames, ndit, n_angles, center, rot_angles, epsilon_right)
 end
 
 # Generic reader for delimited matrix files (space or tab-separated)

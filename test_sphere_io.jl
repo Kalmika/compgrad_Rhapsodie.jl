@@ -14,14 +14,16 @@ println("- Image Dimension Y (l1) : ", parameters.dim_y)
 println("- Total frames (l2) : ", parameters.n_frames)
 println("- NDIT factor (l3) : ", parameters.ndit)
 println("- Total angles read (l4) : ", parameters.n_angles)
-println("- Star center (l5, l6): X=$(parameters.center[1]) | Y=$(parameters.center[2])")
+println("- Star center (l5, l6), swapped to (row, col): $(parameters.center)")
 
-println("\n- Sample of the 160 angles (l7 to l166):")
+println("\n- Sample of the angles (l7 to l(6+n_angles)), converted to radians:")
 println("    First 3 : ", parameters.rot_angles[1:3])
 println("    Last 3 : ", parameters.rot_angles[end-2:end])
+println("    First 3, back in degrees : ", rad2deg.(parameters.rot_angles[1:3]))
 
-println("\n- True North offset (l167) : ", parameters.true_north_offset)
-println("- Plate scale (l168) : ", parameters.plate_scale)
+# Last two lines: right-channel offset, swapped to (row, col) and negated.
+# Expected for AB Aurigae: (-10.7492, 1.2050); measured on the data: (-11.06, 1.10).
+println("\n- Right-channel offset (last two lines) : ", parameters.epsilon_right)
 
 ## 2. Read Crosstalk coefficients (now generic)
 coefficients, n_hwp, n_cols = read_crosstalk_coefficients(ndit=parameters.ndit)

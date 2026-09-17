@@ -203,33 +203,102 @@ function init_rhapsodie_leakage(;alpha = 1e-2, write_files=false, data_folder = 
     return D, Dstar, S_star.I, AS_noblur, nAS, S_disk
 end
 
+# Binning spatial b×b des `d` premières dimensions d'un cube (h, w, n_frames).
+#   reduce = :sum        -> somme des blocs (données détecteur, flux conservé)
+#   reduce = :mean       -> moyenne des blocs
+#   reduce = :precision  -> poids de précision (1/variance) : 1/Σ(1/w), avec w=0 => 0
+function bin_slices(A::AbstractArray{T,3}, b::Int; reduce::Symbol = :sum) where {T}
+    b == 1 && return A
+    h, w, n = size(A)
+    @assert h % b == 0 && w % b == 0 "size ($h,$w) not divisible by bin factor $b"
+    H, W = h ÷ b, w ÷ b
+    out = zeros(T, H, W, n)
+    for k in 1:n, j in 1:W, i in 1:H
+        block = @view A[(i-1)*b+1:i*b, (j-1)*b+1:j*b, k]
+        if reduce === :sum
+            out[i, j, k] = sum(block)
+        elseif reduce === :mean
+            out[i, j, k] = sum(block) / (b * b)
+        elseif reduce === :precision
+            s = zero(T)
+            ok = true
+            for v in block
+                v <= 0 ? (ok = false; break) : (s += one(T) / v)
+            end
+            out[i, j, k] = ok ? one(T) / s : zero(T)
+        else
+            error("unknown reduce=$reduce")
+        end
+    end
+    return out
+end
+
+# `angle_sign` : signe de la rotation de champ. Le fichier donne un angle en degres ;
+#   read_sphere_parameters le convertit en radians mais n'applique aucun signe, parce que
+#   le signe ne se deduit pas du code existant. Rhapsodie.jl utilisait deg2rad(-par[7]),
+#   mais sa transformation (grad_tools.jl::TransRotate) n'est PAS celle de
+#   RhapsodieDirect::field_transform : aucune combinaison de signes ne les rend egales,
+#   donc son signe ne se transpose pas tel quel. A valider visuellement : avec le bon
+#   signe le disque reste fixe d'une frame a l'autre apres derotation, avec le mauvais il
+#   tourne a double vitesse.
+# `apply_epsilon` / `dither_both_channels` : voir la note d'epsilon dans SPHERE_IO.jl.
+#   Le dithering est nul sur HD109562 et AB Aur, donc dither_both_channels n'a aucun effet
+#   mesurable aujourd'hui ; il est expose pour le jour ou un jeu aura un dithering non nul.
 function init_sphere_leakage(data_folder::String;
     psf_type::String = "parametered",
     psf_star_type::String = "estimated",
     noise_model_str::String = "diagonal",
     corr_amplitude::Float64 = 0.0,
     corr_filter_size::Float64 = 1.5,
+    downsample::Int = 1,
+    angle_sign::Int = -1,
+    apply_epsilon::Bool = true,
+    dither_both_channels::Bool = true,
+    data_file::String = "DATA_processed_coro.fits",
+    weight_file::String = "WEIGHT_processed_coro.fits",
     verbose::Bool = true
 )
+    @assert downsample >= 1 "downsample must be >= 1"
+    @assert abs(angle_sign) == 1 "angle_sign must be +1 or -1"
     # --- 1. Métadonnées SPHERE ---
     verbose && println("Reading SPHERE metadata from: ", data_folder * "/Parameters.txt")
     meta = read_sphere_parameters(data_folder * "/Parameters.txt")
     verbose && println("  dim_y=$(meta.dim_y), n_frames=$(meta.n_frames), ndit=$(meta.ndit), n_angles=$(meta.n_angles)")
     verbose && println("  center=$(meta.center)")
 
-    object_size = (meta.dim_y, meta.dim_y)
-    data_size   = (meta.dim_y, 2 * meta.dim_y)
+    # --- Binning optionnel : on réduit réellement la résolution (objet ET données)
+    #     pour rester cohérent avec le modèle direct (objet == moitié-données).
+    @assert meta.dim_y % downsample == 0 "dim_y=$(meta.dim_y) not divisible by downsample=$downsample"
+    dim_y     = meta.dim_y ÷ downsample
+    center    = (meta.center[1] / downsample, meta.center[2] / downsample)
+    eps_right = apply_epsilon ?
+        (meta.epsilon_right[1] / downsample, meta.epsilon_right[2] / downsample) : (0., 0.)
+    if downsample != 1
+        verbose && println("  downsample=$downsample -> dim_y=$dim_y, center=$center")
+    end
+
+    object_size = (dim_y, dim_y)
+    data_size   = (dim_y, 2 * dim_y)
     n_frames    = meta.n_frames
     ndit        = meta.ndit
 
     # --- 2. Paramètres objet / données ---
-    object_params = ObjectParameters(object_size, meta.center)
-    data_params   = DatasetParameters(data_size, n_frames, ndit, meta.n_angles, meta.center)
+    # hwp_cycles = frames / (4 positions HWP × ndit), comme Nangle=NTOT÷(Nframe*4) dans PADI.
+    # meta.n_angles (= n_frames) etait passe ici, ce qui donnait 128 cycles pour 128 frames.
+    @assert n_frames % (4 * ndit) == 0 "n_frames=$n_frames not divisible by 4*ndit=$(4*ndit)"
+    hwp_cycles = n_frames ÷ (4 * ndit)
+    object_params = ObjectParameters(object_size, center)
+    data_params   = DatasetParameters(data_size, n_frames, ndit, hwp_cycles, center)
 
     # --- 3. Données et poids réels ---
     verbose && println("Loading data and weights from FITS...")
-    data    = permutedims(readfits(data_folder * "/DATA_processed_coro.fits"),   (2, 1, 3))
-    weights = permutedims(readfits(data_folder * "/WEIGHT_processed_coro.fits"), (2, 1, 3))
+    data    = permutedims(readfits(data_folder * "/" * data_file),   (2, 1, 3))
+    weights = permutedims(readfits(data_folder * "/" * weight_file), (2, 1, 3))
+    if downsample != 1
+        # data : sommes des blocs (flux conservé) ; weights : précision combinée 1/Σ(1/w)
+        data    = bin_slices(data,    downsample; reduce = :sum)
+        weights = bin_slices(weights, downsample; reduce = :precision)
+    end
     verbose && println("  data: ", size(data), "  weights: ", size(weights))
 
     # --- 4. Coefficients polarimétriques réels (avec cross-talk) ---
@@ -262,13 +331,17 @@ function init_sphere_leakage(data_folder::String;
     # --- 7. Field transforms (rotation ADI + dithering + cross-talk) ---
     ker          = CatmullRomSpline(Float64, Flat)
     field_params = FieldTransformParameters[]
+    @assert length(meta.rot_angles) >= n_frames "only $(length(meta.rot_angles)) angles for $n_frames frames"
+    verbose && println("  angle_sign=$angle_sign, epsilon_right=$eps_right (row, col)")
     for i in 1:n_frames
-        dy, dx = dither_for(i)
+        dy, dx = dither_for(i) ./ downsample
+        trans_right = dither_both_channels ?
+            (dy + eps_right[1], dx + eps_right[2]) : eps_right
         push!(field_params, FieldTransformParameters(
             ker,
-            meta.rot_angles[i],                                               # angle parallactique (ADI)
+            angle_sign * meta.rot_angles[i],                                   # rotation de champ (rad)
             (dy, dx),                                                          # décalage spatial (dithering)
-            (0., 0.),
+            trans_right,                                                       # dithering + décalage canal droit
             (coeffs_matrix[i,1], coeffs_matrix[i,2], coeffs_matrix[i,3]),    # (I, Q, U) caméra gauche
             (coeffs_matrix[i,4], coeffs_matrix[i,5], coeffs_matrix[i,6])))   # (I, Q, U) caméra droite
     end
@@ -280,7 +353,7 @@ function init_sphere_leakage(data_folder::String;
 
     # --- 9. Modèle de bruit (poids pré-calculés depuis WEIGHT_processed_coro.fits) ---
     verbose && println("-> noise_model_str: ", noise_model_str)
-    noise_model = string_to_noise_model(noise_model_str, meta.dim_y, 1.0, corr_amplitude, corr_filter_size, verbose)
+    noise_model = string_to_noise_model(noise_model_str, dim_y, 1.0, corr_amplitude, corr_filter_size, verbose)
     if isa(noise_model, DiagonalNoise) || isa(noise_model, DiagonalAndCorrelatedNoise)
         noise_model = with_weights(noise_model, weights)
     end
