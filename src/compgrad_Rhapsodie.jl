@@ -97,11 +97,11 @@ end
 
 
 
-function init_rhapsodie_leakage(;alpha = 1e-2, write_files=false, data_folder = "default", noise_model_str::String = "diagonal", corr_amplitude::Float64 = 0.0, corr_filter_size::Float64 = 1.5,
+function init_rhapsodie_leakage(;alpha = 1e-2, write_files=false, data_folder = "default", path_disk::String = "default", noise_model_str::String = "diagonal", corr_amplitude::Float64 = 0.0, corr_filter_size::Float64 = 1.5,
     reg_param_relative::Float64 = 1e-3, verbose::Bool = true, is_zero_star::Bool = false, is_zero_disk::Bool = false, pcent_dead_pixel::Float64 = 0.0)
-    
+
     (data_folder ==  "default") && (data_folder = replace(pathof(compgrad_Rhapsodie), "src/compgrad_Rhapsodie.jl" => "data"))
-    path_disk = data_folder*"/sample_for_rhapsodie_128x128.h5"
+    (path_disk == "default") && (path_disk = data_folder*"/sample_for_rhapsodie_128x128.h5")
     path_star = data_folder*"/star_cropped.fits"
     ker = CatmullRomSpline(Float64, Flat)
 
